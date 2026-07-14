@@ -21,6 +21,7 @@ jobs:
           node-version: 24
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm exec vitest run --project node --project http --project angular --project devtools --project sync --project react --project solid --project svelte --project vue
       - run: pnpm test:package
