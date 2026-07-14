@@ -1,0 +1,29 @@
+{
+  "name": "@datagrid/convex-pulse",
+  "version": "0.0.1",
+  "exports": {
+    ".": "./index.ts",
+    "./angular": "./angular/index.ts",
+    "./devtools": "./devtools/index.ts",
+    "./http": "./http/index.ts",
+    "./nextjs": "./nextjs/index.ts",
+    "./react": "./react/index.ts",
+    "./solid": "./solid/index.ts",
+    "./svelte": "./svelte/index.ts",
+    "./sveltekit": "./sveltekit/index.ts",
+    "./sveltekit/server": "./sveltekit/server.ts",
+    "./vue": "./vue/index.ts"
+  },
+  "publish": {
+    "exclude": [
+      ".github",
+      "benchmarks",
+      "docs",
+      "examples",
+      "public",
+      "scripts",
+      "stories",
+      "tests"
+    ]
+  }
+}
