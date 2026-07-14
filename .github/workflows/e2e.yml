@@ -30,9 +30,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --dir tests/e2e exec playwright install --with-deps chromium
       - name: Configure cloud deployment
-        if: matrix.target == 'cloud'
         run: printenv E2E_CLOUD_ENV > tests/e2e/.env.e2e.cloud
       - name: Configure local deployment
-        if: matrix.target == 'local'
         run: printenv E2E_LOCAL_ENV > tests/e2e/.env.e2e.local
       - run: node tests/e2e/run-e2e.mjs ${{ matrix.target }}

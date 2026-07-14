@@ -63,6 +63,7 @@ if (
 const defaultEnvFile = path.resolve(packageDirectory, '.env.local')
 const localEnvFile = path.resolve(packageDirectory, '.env.e2e.local')
 const defaultEnvironment = readFileSync(localEnvFile, 'utf-8')
+const clerk = resolveBinary('clerk')
 const convex = resolveBinary('convex')
 const playwright = resolveBinary('playwright')
 const vitest = resolveBinary('vitest')
@@ -203,7 +204,7 @@ function createClerkFixture() {
     try {
       if (secretKey !== undefined && sessionId !== undefined) {
         run(
-          'clerk',
+          clerk,
           [
             'api',
             '--secret-key',
@@ -220,7 +221,7 @@ function createClerkFixture() {
       try {
         if (secretKey !== undefined && userId !== undefined) {
           run(
-            'clerk',
+            clerk,
             [
               'api',
               '--secret-key',
@@ -248,7 +249,7 @@ function createClerkFixture() {
         )
       }
 
-      run('clerk', [
+      run(clerk, [
         'env',
         'pull',
         '--app',
@@ -264,7 +265,7 @@ function createClerkFixture() {
       throw new Error('Clerk did not return a secret key')
     }
 
-    const templates = runJson('clerk', [
+    const templates = runJson(clerk, [
       'api',
       '--secret-key',
       secretKey,
@@ -275,7 +276,7 @@ function createClerkFixture() {
     }
 
     const fixtureId = randomUUID()
-    const user = runJson('clerk', [
+    const user = runJson(clerk, [
       'users',
       '--secret-key',
       secretKey,
@@ -292,7 +293,7 @@ function createClerkFixture() {
       '--json'
     ])
     userId = user.id
-    const session = runJson('clerk', [
+    const session = runJson(clerk, [
       'api',
       '--secret-key',
       secretKey,
@@ -320,7 +321,7 @@ function createClerkFixture() {
 }
 
 function createClerkToken(secretKey, sessionId) {
-  const token = runJson('clerk', [
+  const token = runJson(clerk, [
     'api',
     '--secret-key',
     secretKey,
