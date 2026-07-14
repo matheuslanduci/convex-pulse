@@ -28,7 +28,7 @@ jobs:
           cache: pnpm
           node-version: 24
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm --dir tests/e2e exec playwright install --with-deps chromium
       - name: Configure cloud deployment
         if: matrix.target == 'cloud'
         run: printenv E2E_CLOUD_ENV > tests/e2e/.env.e2e.cloud
