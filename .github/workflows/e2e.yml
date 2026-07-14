@@ -19,7 +19,6 @@ jobs:
     env:
       CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
       E2E_CLOUD_ENV: ${{ secrets.E2E_CLOUD_ENV }}
-      E2E_LOCAL_ENV: ${{ secrets.E2E_LOCAL_ENV }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -32,6 +31,7 @@ jobs:
       - run: pnpm --dir tests/e2e exec playwright install --with-deps chromium
       - name: Configure cloud deployment
         run: printenv E2E_CLOUD_ENV > tests/e2e/.env.e2e.cloud
-      - name: Configure local deployment
-        run: printenv E2E_LOCAL_ENV > tests/e2e/.env.e2e.local
-      - run: node tests/e2e/run-e2e.mjs ${{ matrix.target }}
+      - name: Run end-to-end tests
+        env:
+          CONVEX_AGENT_MODE: ${{ matrix.target == 'local' && 'anonymous' || '' }}
+        run: node tests/e2e/run-e2e.mjs ${{ matrix.target }}

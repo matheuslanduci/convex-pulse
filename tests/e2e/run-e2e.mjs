@@ -61,8 +61,9 @@ if (
 }
 
 const defaultEnvFile = path.resolve(packageDirectory, '.env.local')
-const localEnvFile = path.resolve(packageDirectory, '.env.e2e.local')
-const defaultEnvironment = readFileSync(localEnvFile, 'utf-8')
+const defaultEnvironment = existsSync(defaultEnvFile)
+  ? readFileSync(defaultEnvFile, 'utf-8')
+  : undefined
 const clerk = resolveBinary('clerk')
 const convex = resolveBinary('convex')
 const playwright = resolveBinary('playwright')
@@ -403,6 +404,15 @@ function createSelfHostedEnvironment() {
   }
 }
 
+function createAnonymousLocalEnvironment() {
+  rmSync(defaultEnvFile, { force: true })
+  run(convex, ['init'], {
+    env: { ...process.env, CONVEX_AGENT_MODE: 'anonymous' }
+  })
+
+  return defaultEnvFile
+}
+
 let selfHostedEnvironment
 let clerkFixture
 
@@ -412,7 +422,9 @@ try {
     target === 'self-hosted' ? createSelfHostedEnvironment() : undefined
   const envFile =
     selfHostedEnvironment?.envFile ??
-    path.resolve(packageDirectory, `.env.e2e.${target}`)
+    (target === 'local' && process.env.CONVEX_AGENT_MODE === 'anonymous'
+      ? createAnonymousLocalEnvironment()
+      : path.resolve(packageDirectory, `.env.e2e.${target}`))
   const deploymentEnvironment = parseEnv(readFileSync(envFile, 'utf-8'))
   const testEnvironment = {
     ...process.env,
@@ -457,7 +469,11 @@ try {
     }
   )
 } finally {
-  writeFileSync(defaultEnvFile, defaultEnvironment)
+  if (defaultEnvironment === undefined) {
+    rmSync(defaultEnvFile, { force: true })
+  } else {
+    writeFileSync(defaultEnvFile, defaultEnvironment)
+  }
   selfHostedEnvironment?.cleanup()
   clerkFixture?.cleanup()
 }
