@@ -3,6 +3,10 @@ packages:
   - examples/*
   - tests/e2e
 
+overrides:
+  postcss@<8.5.10: 8.5.17
+  srvx@<0.11.13: 0.11.22
+
 packageExtensions:
   babel-plugin-react-compiler@1.0.0:
     dependencies:
