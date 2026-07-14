@@ -1,6 +1,6 @@
 {
   "name": "@datagrid/convex-pulse",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "exports": {
     ".": "./index.ts",
     "./angular": "./angular/index.ts",
