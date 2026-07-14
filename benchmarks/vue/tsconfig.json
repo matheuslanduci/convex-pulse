@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "lib": ["dom", "esnext"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "paths": {
+      "#benchmark/api": ["../convex/_generated/api"],
+      "#benchmark/*.js": ["../src/*.ts"]
+    },
+    "strict": true,
+    "target": "esnext",
+    "types": ["vite/client"]
+  },
+  "include": ["**/*.ts"]
+}

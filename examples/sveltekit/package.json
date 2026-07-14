@@ -1,0 +1,28 @@
+{
+  "name": "sveltekit",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#convex/api": "./src/convex/_generated/api.js"
+  },
+  "scripts": {
+    "build": "pnpm check && vite build",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "dev": "convex dev --start 'pnpm dev:app'",
+    "dev:app": "vite dev"
+  },
+  "dependencies": {
+    "convex": "1.42.1",
+    "convex-pulse": "workspace:*",
+    "svelte": "^5.56.4"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-auto": "^7.0.1",
+    "@sveltejs/kit": "^2.69.3",
+    "@sveltejs/vite-plugin-svelte": "^7.2.0",
+    "svelte-check": "^4.0.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.4"
+  }
+}

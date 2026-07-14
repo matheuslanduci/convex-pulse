@@ -1,0 +1,215 @@
+---
+title: Migration guide
+description: Move from the official Convex JavaScript and React clients to Convex Pulse.
+---
+
+Convex Pulse uses the same deployment URL, generated function references, function arguments, and backend. Migration is limited to client construction, imports, call signatures, and UI state handling.
+
+This guide maps the current official [JavaScript client](https://docs.convex.dev/client/javascript/overview) and [React client](https://docs.convex.dev/client/react/overview) APIs to Convex Pulse.
+
+## Package imports
+
+| Before              | After                      |
+| ------------------- | -------------------------- |
+| `convex/browser`    | `convex-pulse`             |
+| `convex/react`      | `convex-pulse/react`       |
+| `ConvexClient`      | `ConvexPulseClient`        |
+| `ConvexReactClient` | `ConvexPulseReactClient`   |
+| `ConvexProvider`    | `ConvexPulseReactProvider` |
+
+Keep `convex` installed because Convex Pulse uses its generated API and public types.
+
+## JavaScript and Node.js
+
+The official `ConvexClient` accepts positional arguments. Convex Pulse groups operation arguments with retry, selection, deduplication, and optimistic options.
+
+```ts
+// Before
+import { ConvexClient } from 'convex/browser'
+
+const client = new ConvexClient(CONVEX_URL)
+const tasks = await client.query(api.tasks.list, {})
+const unsubscribe = client.onUpdate(api.tasks.list, {}, console.log)
+await client.mutation(api.tasks.create, { title: 'Migrate' })
+await client.action(api.tasks.format, { title: 'Migrate' })
+```
+
+```ts
+// After
+import { ConvexPulseClient } from 'convex-pulse'
+
+const client = new ConvexPulseClient(CONVEX_URL)
+const tasks = await client.query(api.tasks.list, { args: {} })
+const subscription = client.onUpdate(api.tasks.list, { args: {} }, console.log)
+await client.mutation(api.tasks.create, {
+  args: { title: 'Migrate' }
+})
+await client.action(api.tasks.format, {
+  args: { title: 'Migrate' }
+})
+```
+
+Convex Pulse's `onUpdate` returns a callable subscription with `unsubscribe()`, `getCurrentValue()`, and `onError(listener)`. Use `watchQuery` when an async iterable is a better fit. Both clients expose asynchronous `close()` cleanup.
+
+## React setup
+
+Rename the client and provider. The Pulse provider prop is `convex` rather than `client`.
+
+```tsx
+// Before
+const convex = new ConvexReactClient(CONVEX_URL)
+
+root.render(
+  <ConvexProvider client={convex}>
+    <App />
+  </ConvexProvider>
+)
+```
+
+```tsx
+// After
+const convex = new ConvexPulseReactClient(CONVEX_URL)
+
+root.render(
+  <ConvexPulseReactProvider convex={convex}>
+    <App />
+  </ConvexPulseReactProvider>
+)
+```
+
+## React queries
+
+Move arguments into `options.args`. Replace the official client's `undefined`-while-loading model with a discriminated result.
+
+```tsx
+// Before
+const tasks = useQuery(api.tasks.list, { listId })
+
+if (tasks === undefined) return <Spinner />
+return <TaskList tasks={tasks} />
+```
+
+```tsx
+// After
+const tasks = useQuery(api.tasks.list, { args: { listId } })
+
+if (tasks.status === 'pending') return <Spinner />
+if (tasks.status === 'error') return <ErrorView error={tasks.error} />
+if (tasks.status === 'disabled') return null
+return <TaskList tasks={tasks.data} />
+```
+
+Replace `"skip"` with `enabled`:
+
+```tsx
+// Before
+useQuery(api.tasks.get, id ? { id } : 'skip')
+
+// After
+useQuery(api.tasks.get, {
+  args: { id: id! },
+  enabled: id !== undefined
+})
+```
+
+## React mutations
+
+Calling a mutation remains the same. Configuration moves from chained helpers to the hook's options, and the callable also exposes lifecycle state.
+
+```tsx
+// Before
+const createTask = useMutation(api.tasks.create).withOptimisticUpdate(
+  (store, args) => {
+    const current = store.getQuery(api.tasks.list, {})
+    if (current) store.setQuery(api.tasks.list, {}, [...current, args])
+  }
+)
+```
+
+```tsx
+// After
+const createTask = useMutation(api.tasks.create, {
+  optimistic: ({ data, optimisticId, store }) =>
+    store.get(api.tasks.list).append({
+      _id: optimisticId,
+      _creationTime: Date.now(),
+      done: false,
+      title: data.title
+    })
+})
+```
+
+Replace manual `getQuery`/`setQuery` transforms with shape-aware operations.
+
+## Pagination
+
+Replace the separate `usePaginatedQuery` hook with the normal Pulse query hook.
+
+```tsx
+// Before
+const { results, status, loadMore } = usePaginatedQuery(
+  api.tasks.listPaginated,
+  { listId },
+  { initialNumItems: 20 }
+)
+```
+
+```tsx
+// After
+const tasks = useQuery(api.tasks.listPaginated, {
+  args: { listId },
+  pagination: { initialNumItems: 20 }
+})
+
+if (tasks.status === 'success' && tasks.canLoadMore) {
+  tasks.loadMore(20)
+}
+```
+
+## Actions
+
+Replace the official React hook with the Pulse lifecycle-aware hook:
+
+```ts
+// Before
+const format = useAction(api.tasks.format)
+await format({ title })
+
+// After
+const format = useAction(api.tasks.format)
+await format({ title })
+```
+
+The Pulse hook also exposes `status`, `data`, `error`, `isPending`, callbacks, retries, and `reset()`. The JavaScript client uses `.action(reference, { args: { title } })`.
+
+## Authentication
+
+Replace `ConvexProviderWithAuth` or provider-specific wrappers with your auth provider and pass its token fetcher to `ConvexPulseReactProvider`:
+
+```tsx
+const fetchToken = useCallback(
+  ({ forceRefreshToken }: { forceRefreshToken: boolean }) =>
+    getToken({ skipCache: forceRefreshToken }),
+  [getToken]
+)
+
+return (
+  <ConvexPulseReactProvider convex={convex} fetchToken={fetchToken}>
+    <App />
+  </ConvexPulseReactProvider>
+)
+```
+
+You can instead pass `fetchToken` when constructing any live Pulse client or call `client.setAuth()` programmatically. Use `onChange`, `onError`, and `onRefreshChange` with `setAuth()` if the UI needs authentication state. Convex Pulse does not currently provide `Authenticated`, `Unauthenticated`, or `useConvexAuth` components/hooks.
+
+## Before removing old imports
+
+Verify these differences:
+
+- Every query handles `pending`, `error`, `success`, and optionally `disabled`.
+- Every query's arguments are inside `args`.
+- Conditional queries use `enabled` rather than `"skip"`.
+- Paginated views use `data` and `canLoadMore` rather than `results` and the official pagination status strings.
+- Actions use the client instance.
+- Authentication state previously supplied by Convex React helpers is supplied by your auth integration.
+- Each long-lived client is closed when its application or process ends.

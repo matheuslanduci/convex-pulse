@@ -1,0 +1,41 @@
+---
+title: Devtools
+description: Mount the Convex Pulse client inspector in any browser application.
+---
+
+Devtools displays connection state, active and inactive queries, actions, mutations, deduplicated callers, and optimistic-layer events. Every Convex Pulse client exposes the required `devtools` handle.
+
+## Any browser framework
+
+```ts
+import { mountConvexPulseDevtools } from 'convex-pulse/devtools'
+
+const devtools = mountConvexPulseDevtools(convex, {
+  initialIsOpen: true
+})
+
+devtools.open()
+devtools.close()
+devtools.unmount()
+```
+
+Pass `container` to mount somewhere other than `document.body`. Pass `styleNonce` when a Content Security Policy requires a nonce for the shadow root stylesheet.
+
+For manual control, construct `new ConvexPulseDevtools(target, options)` and call `mount(container?)`. Mounting twice without unmounting throws.
+
+## React
+
+React exports a component from `convex-pulse/react`:
+
+```tsx
+<ConvexPulseReactProvider convex={convex}>
+  <App />
+  <ConvexPulseDevtools initialIsOpen />
+</ConvexPulseReactProvider>
+```
+
+It mounts against the nearest Pulse provider and unmounts automatically.
+
+## Target and options
+
+`mountConvexPulseDevtools` and the class constructor accept either a Pulse client or a raw `DevtoolsHandle`. Options are `initialIsOpen`, `styleNonce`, and for the mounting helper, `container`.

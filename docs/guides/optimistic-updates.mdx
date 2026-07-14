@@ -1,0 +1,241 @@
+---
+title: Optimistic updates
+description: Update cached Convex query results immediately and reconcile them with mutation results.
+---
+
+Optimistic updates make a mutation feel immediate. Convex Pulse applies a temporary layer to cached query results when the mutation starts, keeps that layer over incoming server updates, and removes it when the mutation settles.
+
+- On success, the optimistic layer is removed as the confirmed server state arrives.
+- On failure, the layer is rolled back to the latest server state.
+- When mutations overlap, each mutation owns an independent layer.
+- When a mutation retries, Pulse preserves the same layer between attempts.
+
+## Add an optimistic update
+
+Pass an `optimistic` callback to a mutation primitive. The following React example inserts a temporary task before the server responds:
+
+```tsx
+const createTask = useMutation(api.tasks.create, {
+  optimistic: ({ data, optimisticId, store }) => {
+    store.get(api.tasks.list, { listId: data.listId }).append({
+      _id: optimisticId,
+      _creationTime: Date.now(),
+      done: false,
+      listId: data.listId,
+      title: data.title
+    })
+  }
+})
+
+await createTask({ listId, title: 'Write optimistic update guide' })
+```
+
+The callback receives:
+
+| Property | Purpose |
+| --- | --- |
+| `data` | The mutation arguments passed by the caller |
+| `optimisticId` | A typed temporary Convex ID for newly created records |
+| `store` | Access to query results that the optimistic layer can change |
+
+The same `optimistic` option is available in `useMutation`, `injectMutation`, `createMutation`, and the framework-neutral `client.mutation()` API.
+
+## Select the cached query
+
+Call `store.get(query, args?)` with the generated query reference and the exact arguments used by the query consumer.
+
+```ts
+const tasks = store.get(api.tasks.list, { listId: data.listId })
+```
+
+Each argument combination is a separate cache entry. Updating `api.tasks.list` with `{ listId: 'one' }` does not update the same query with `{ listId: 'two' }`.
+
+Optimistic operations affect successful cached results. If the query is pending or has not produced data yet, there is no visible value to transform; the layer can still apply if that query succeeds before the mutation settles.
+
+## Update arrays
+
+Array results expose collection operations inferred from the query return type.
+
+| Operation | Behavior |
+| --- | --- |
+| `append(value)` | Add an item to the end |
+| `prepend(value)` | Add an item to the beginning |
+| `insert(value, position)` | Insert before or after a keyed item |
+| `remove(key, keyBy?)` | Remove a keyed item |
+| `replace(key, value, keyBy?)` | Replace a keyed item completely |
+| `update(key, patch, keyBy?)` | Shallow-merge an object item or replace a primitive |
+| `upsert(value, keyBy?)` | Replace a matching item or append it |
+
+### Append and prepend
+
+```ts
+optimistic: ({ data, optimisticId, store }) => {
+  const tasks = store.get(api.tasks.list, { listId: data.listId })
+
+  tasks.prepend({
+    _id: optimisticId,
+    _creationTime: Date.now(),
+    done: false,
+    listId: data.listId,
+    title: data.title
+  })
+}
+```
+
+### Update and remove by `_id`
+
+Object items use `_id` as their default stable key.
+
+```ts
+const setDone = useMutation(api.tasks.setDone, {
+  optimistic: ({ data, store }) => {
+    store.get(api.tasks.list, { listId }).update(data.id, { done: data.done })
+  }
+})
+
+const removeTask = useMutation(api.tasks.remove, {
+  optimistic: ({ data, store }) => {
+    store.get(api.tasks.list, { listId }).remove(data.id)
+  }
+})
+```
+
+Here `listId` is the same value used by the surrounding query. The documented `setDone` and `remove` mutations do not receive it, so capture it from the component instead of reading `data.listId`.
+
+`update`, `remove`, and `replace` leave the array unchanged when no item has the requested key.
+
+### Use a custom key
+
+Pass `keyBy` when items do not have an `_id` or another field identifies them.
+
+```ts
+optimistic: ({ data, store }) => {
+  store
+    .get(api.members.list, { teamId: data.teamId })
+    .update(data.email, { role: data.role }, (member) => member.email)
+}
+```
+
+Primitive arrays use the item value itself as the default key.
+
+### Insert relative to an item
+
+Given a `previousTaskId` from the currently rendered list, insert a new task after it. Without a custom `keyBy`, `before` and `after` use the task `_id`:
+
+```ts
+optimistic: ({ data, optimisticId, store }) => {
+  store.get(api.tasks.list, { listId: data.listId }).insert(
+    {
+      _id: optimisticId,
+      _creationTime: Date.now(),
+      done: false,
+      listId: data.listId,
+      title: data.title
+    },
+    { after: previousTaskId }
+  )
+}
+```
+
+Use either `before` or `after`. If the target is absent, the collection remains unchanged. Pass `keyBy` when the relative key is a field other than `_id`.
+
+### Upsert an item
+
+```ts
+optimistic: ({ data, store }) => {
+  store.get(api.tasks.list, { listId: data.listId }).upsert(data.task)
+}
+```
+
+`upsert` replaces the item with the same `_id`, or appends the value when it is not present.
+
+## Update aggregated paginated results
+
+Use `store.paginated(query, baseArgs)` to update every loaded page belonging to one paginated result. Do not include `paginationOpts`; Pulse matches the page cache entries internally.
+
+```ts
+const createTask = useMutation(api.tasks.create, {
+  optimistic: ({ data, optimisticId, store }) => {
+    store.paginated(api.tasks.listPaginated, { listId: data.listId }).prepend({
+      _id: optimisticId,
+      _creationTime: Date.now(),
+      done: false,
+      listId: data.listId,
+      title: data.title
+    })
+  }
+})
+```
+
+Paginated helpers operate on the aggregated collection while preserving each cached page envelope:
+
+| Operation | Behavior |
+| --- | --- |
+| `prepend(value)` | Add to the first loaded page |
+| `appendIfLoaded(value)` | Add only when the loaded pages include the terminal page |
+| `update(key, patch, keyBy?)` | Update every matching loaded item |
+| `replace(key, value, keyBy?)` | Replace every matching loaded item |
+| `remove(key, keyBy?)` | Remove every matching loaded item |
+
+Argument variants remain isolated, and all page changes belong to the mutation's normal optimistic layer, including replay over live updates and rollback on failure.
+
+## Update objects
+
+Queries returning an object expose `merge()`. It shallow-merges the supplied fields into the current result.
+
+```ts
+const renameList = useMutation(api.lists.rename, {
+  optimistic: ({ data, store }) => {
+    store.get(api.lists.get, { id: data.id }).merge({ name: data.name })
+  }
+})
+```
+
+Nested objects are replaced, not deeply merged.
+
+## Update primitive values
+
+Queries returning strings, numbers, booleans, or other non-object values expose `modify()`.
+
+```ts
+const setStatus = useMutation(api.sync.setStatus, {
+  optimistic: ({ data, store }) => {
+    store.get(api.sync.status).modify(data.status)
+  }
+})
+```
+
+## Update multiple queries
+
+One mutation can update every affected cache entry in the same optimistic layer.
+
+```ts
+optimistic: ({ data, store }) => {
+  store
+    .get(api.tasks.list, { listId: data.listId })
+    .update(data.id, { done: data.done })
+
+  store.get(api.tasks.get, { id: data.id }).merge({ done: data.done })
+}
+```
+
+If the callback throws, Pulse discards the partial layer and does not send the mutation.
+
+## Understand reconciliation
+
+Pulse keeps server data and optimistic layers separate. A live server update received while a mutation is pending becomes the new base, then Pulse reapplies every active optimistic layer over it. This prevents an unrelated live update from erasing the user's pending change.
+
+When calls overlap, layers are applied in call order. Settling one mutation removes only its layer; the remaining layers are recomputed over the newest server base.
+
+## Handle filtered and sorted queries
+
+Pulse cannot infer application rules such as filters, permissions, or sort order. Apply the operation that matches what the server query will return.
+
+- Remove an item when an optimistic field change means it no longer matches a filter.
+- Use `insert` instead of `append` when a query has a meaningful order.
+- Update every argument-specific cache entry currently represented in the UI.
+- Prefer a stable `keyBy` selector; array indexes are not stable keys.
+
+## Inspect optimistic layers
+
+Convex Pulse Devtools shows active layers and their ordered operations. Use it to confirm the targeted query arguments, temporary IDs, overlapping layers, confirmation, and rollback events.

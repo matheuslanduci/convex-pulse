@@ -1,0 +1,44 @@
+{
+  "name": "@convex-pulse/benchmarks",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#benchmark/api": "./convex/_generated/api.js",
+    "#benchmark/*.js": "./src/*.ts"
+  },
+  "scripts": {
+    "benchmark": "node run-benchmarks.mjs local all",
+    "benchmark:node": "node run-benchmarks.mjs local",
+    "benchmark:node:cloud": "node run-benchmarks.mjs cloud",
+    "benchmark:node:docker": "node run-benchmarks.mjs self-hosted",
+    "benchmark:node:local": "node run-benchmarks.mjs local",
+    "benchmark:node:raw": "node --experimental-strip-types src/run.ts",
+    "benchmark:react": "node run-benchmarks.mjs local react",
+    "benchmark:react:cloud": "node run-benchmarks.mjs cloud react",
+    "benchmark:react:docker": "node run-benchmarks.mjs self-hosted react",
+    "benchmark:react:local": "node run-benchmarks.mjs local react",
+    "benchmark:vue": "node run-benchmarks.mjs local vue",
+    "benchmark:vue:cloud": "node run-benchmarks.mjs cloud vue",
+    "benchmark:vue:docker": "node run-benchmarks.mjs self-hosted vue",
+    "benchmark:vue:local": "node run-benchmarks.mjs local vue",
+    "convex:dev": "convex dev",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p react/tsconfig.json && tsc --noEmit -p vue/tsconfig.json"
+  },
+  "dependencies": {
+    "convex": "1.42.1",
+    "convex-pulse": "workspace:*",
+    "convex-vue": "0.1.5",
+    "vue": "^3.5.39"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@types/node": "24.13.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "vite": "^8.1.4"
+  }
+}

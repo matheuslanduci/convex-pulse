@@ -1,0 +1,449 @@
+---
+title: React
+description: React provider, query and mutation hooks, actions, prefetching, and Devtools.
+---
+
+## Setup
+
+For a new Vite project, scaffold React and install both Convex packages:
+
+```bash
+pnpm create vite my-app --template react-ts
+cd my-app
+pnpm add convex-pulse convex
+pnpm exec convex dev
+```
+
+The last command creates or selects a Convex development deployment, generates `convex/_generated/api`, and writes `VITE_CONVEX_URL` to `.env.local`. Add the backend from [Before you start](/docs/usage#before-you-start) before using the function references below.
+
+Create one client in its own module so components can use it for imperative operations such as actions.
+
+```ts title="src/convex.ts"
+import { ConvexPulseReactClient } from 'convex-pulse/react'
+
+export const convex = new ConvexPulseReactClient(
+  import.meta.env.VITE_CONVEX_URL
+)
+```
+
+Provide that client above every component that uses Pulse hooks.
+
+```tsx title="src/main.tsx"
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import {
+  ConvexPulseDevtools,
+  ConvexPulseReactProvider
+} from 'convex-pulse/react'
+
+import { App } from './App'
+import { convex } from './convex'
+
+const rootElement = document.getElementById('root')
+if (rootElement === null) throw new Error('Missing #root element')
+
+createRoot(rootElement).render(
+  <StrictMode>
+    <ConvexPulseReactProvider convex={convex}>
+      <App />
+      <ConvexPulseDevtools />
+    </ConvexPulseReactProvider>
+  </StrictMode>
+)
+```
+
+`ConvexPulseDevtools` is the React component wrapper. The framework-neutral `convex-pulse/devtools` entrypoint exports the imperative mounting API used outside React.
+
+### Complete client component
+
+This minimal component uses the backend from [Before you start](/docs/usage#before-you-start) and can be copied into `src/App.tsx`:
+
+```tsx title="src/App.tsx"
+import {
+  useAction,
+  useMutation,
+  usePrefetchQuery,
+  useQuery
+} from 'convex-pulse/react'
+import { useState } from 'react'
+
+import { api } from '../convex/_generated/api'
+
+const listId = 'default'
+
+export function App() {
+  const [title, setTitle] = useState('Write the docs')
+  const tasks = useQuery(api.tasks.list, { args: { listId } })
+  const createTask = useMutation(api.tasks.create)
+  const formatTask = useAction(api.tasks.format)
+  const prefetchTasks = usePrefetchQuery(api.tasks.list)
+
+  function warmTasks() {
+    const handle = prefetchTasks({ listId })
+    void handle.ready.catch(() => undefined)
+    return handle.cancel
+  }
+
+  if (tasks.status === 'pending') return <p>Loading…</p>
+  if (tasks.status === 'error') return <p>{tasks.error.message}</p>
+  if (tasks.status === 'disabled') return null
+
+  return (
+    <main>
+      <input
+        aria-label="Task title"
+        onChange={(event) => setTitle(event.target.value)}
+        value={title}
+      />
+      <button
+        disabled={createTask.isPending}
+        onClick={() => void createTask({ listId, title })}
+        type="button"
+      >
+        Create task
+      </button>
+      <button
+        disabled={formatTask.isPending}
+        onClick={() => void formatTask({ title })}
+        type="button"
+      >
+        Format title
+      </button>
+      <button onPointerEnter={warmTasks} type="button">
+        Prefetch tasks
+      </button>
+      {tasks.data.map((task) => (
+        <p key={task._id}>{task.title}</p>
+      ))}
+    </main>
+  )
+}
+```
+
+This example intentionally leaves authentication optional. Add the provider token fetcher in the [authentication guide](#authentication) only after configuring an authentication provider.
+
+## Authentication
+
+First configure your provider's JWT issuer and audience in `convex/auth.config.ts` by following the official [Convex authentication guides](https://docs.convex.dev/auth). Convex Pulse does not create sessions or tokens; it sends the identity JWT returned by your auth SDK to Convex.
+
+When the user is signed in, obtain the SDK's token function and wrap it in a stable callback. Pass `forceRefreshToken` through as the SDK's cache-bypass option so Pulse can recover when a token expires or Convex rejects it.
+
+When an auth library can return a token programmatically, pass a fetcher to the provider. It receives `forceRefreshToken` when the token cache must be bypassed.
+
+```tsx
+import { useCallback } from 'react'
+
+const fetchToken = useCallback(
+  ({ forceRefreshToken }: { forceRefreshToken: boolean }) =>
+    getToken({ skipCache: forceRefreshToken }),
+  [getToken]
+)
+
+return (
+  <ConvexPulseReactProvider
+    convex={convex}
+    fetchToken={isLoaded && isSignedIn ? fetchToken : undefined}
+    isAuthLoading={!isLoaded}
+  >
+    <App />
+  </ConvexPulseReactProvider>
+)
+```
+
+Pass `isAuthLoading` while the auth SDK resolves its initial session. The provider withholds descendants during that phase and, for a signed-in user, until Convex confirms the token, so authenticated query subscriptions cannot start anonymously. Use `authLoadingFallback` to render a loading placeholder. Removing `fetchToken` on sign-out clears the authenticated identity and its identity-scoped query cache. Do not install a fetcher that returns no token for a signed-out user.
+
+Keep the provider mounted above every authenticated query. It configures authentication after mounting, refreshes tokens for the lifetime of the provider, and clears the auth configuration when it unmounts or the callback is removed. Descendants can read the backend-confirmed `isLoading`, `isAuthenticated`, and `isRefreshing` values with `useConvexPulseAuth()`.
+
+For an imperative integration, call `convex.setAuth(fetchToken, options?)` after sign-in and `convex.clearAuth()` on sign-out. The optional callbacks report authentication, refresh, and token-fetch failures:
+
+```ts
+convex.setAuth(fetchToken, {
+  onChange: (isAuthenticated) => console.log({ isAuthenticated }),
+  onError: (error) => console.error(error),
+  onRefreshChange: (isRefreshing) => console.log({ isRefreshing })
+})
+```
+
+## `useQuery`
+
+`useQuery(reference, options)` subscribes the component to a live query. The subscription is released when the component unmounts.
+
+### Fetching data
+
+```tsx
+const tasks = useQuery(api.tasks.list, {
+  args: { listId }
+})
+```
+
+Arguments always go under `args`, including an empty object for a query without arguments.
+
+### Selecting data
+
+Use `select` to derive the value exposed in `data`. It runs when the underlying query result changes.
+
+```tsx
+const openTaskTitles = useQuery(api.tasks.list, {
+  args: { listId },
+  select: (tasks) =>
+    tasks.filter((task) => !task.done).map((task) => task.title)
+})
+```
+
+### Handling query state
+
+The result is a discriminated union with `pending`, `error`, `success`, and `disabled` states.
+
+```tsx
+if (tasks.status === 'pending') return <Spinner />
+if (tasks.status === 'error') return <ErrorMessage error={tasks.error} />
+if (tasks.status === 'disabled') return null
+
+return <TaskList tasks={tasks.data} />
+```
+
+`isLoading` is `true` only in the pending state. Checking `status` narrows `data` and `error`.
+
+### Disabling a query
+
+Pass `skipToken` when the arguments do not exist yet. Pulse does not prepare a cache entry or subscription for a skipped query.
+
+```tsx
+import { skipToken } from 'convex-pulse/react'
+
+const task = useQuery(api.tasks.get, {
+  args: taskId === null ? skipToken : { id: taskId }
+})
+```
+
+`enabled` remains available when arguments exist but the subscription should be temporarily inactive. Keep calling the hook in both cases.
+
+### Throwing query errors
+
+Set `throwOnError: true` to throw query failures during render so the nearest React error boundary handles them. The returned type excludes the `error` state when this option is the literal `true`.
+
+```tsx
+const tasks = useQuery(api.tasks.list, {
+  args: { listId },
+  throwOnError: true
+})
+```
+
+### Observing data changes
+
+`onDataChange` runs after the initial successful result when the selected data changes.
+
+```tsx
+const tasks = useQuery(api.tasks.list, {
+  args: { listId },
+  onDataChange: ({ next, previous }) => {
+    console.log('Tasks changed', { next, previous })
+  }
+})
+```
+
+Use `useOnDataChange(tasks, listener)` when the result and listener need to be composed separately.
+
+### Retrying failures
+
+Set `retries` to the number of additional attempts after a query failure.
+
+```tsx
+const tasks = useQuery(api.tasks.list, {
+  args: { listId },
+  retries: 2
+})
+```
+
+### Loading paginated data
+
+Use the same hook with a paginated query reference and `pagination` options. Paginated queries do not support `select`.
+
+```tsx
+const tasks = useQuery(api.tasks.listPaginated, {
+  args: { listId },
+  pagination: { initialNumItems: 20 }
+})
+
+if (tasks.status === 'success' && tasks.canLoadMore) {
+  tasks.loadMore(20)
+}
+```
+
+Successful pagination results expose `data`, `canLoadMore`, `isLoading`, `isLoadingMore`, and `loadMore(numItems)`. Their `isLoading` is `false`; it is present so paginated and non-paginated results share the same loading flag.
+
+## `useMutation`
+
+`useMutation(reference, options?)` returns a typed callable that also exposes its latest lifecycle state.
+
+### Executing a mutation
+
+```tsx
+const createTask = useMutation(api.tasks.create)
+
+const id = await createTask({ listId, title: 'Write React docs' })
+```
+
+Read lifecycle state from the returned callable. Accessing these properties during render subscribes the component to updates.
+
+```tsx
+if (createTask.isPending) return <p>Creating…</p>
+if (createTask.status === 'error') {
+  return <p>{createTask.error.message}</p>
+}
+if (createTask.status === 'success') {
+  return <p>Created {createTask.data}</p>
+}
+```
+
+Mutations use `isPending`, matching TanStack Query v5 mutation terminology. `isLoading` is reserved for queries.
+
+### Handling mutation state
+
+The callable exposes `status`, `data`, `error`, `isPending`, and `reset()`.
+
+```tsx
+const createTask = useMutation(api.tasks.create, {
+  onMutate: ({ args }) => console.log('Creating', args.title),
+  onSuccess: ({ data }) => console.log('Created', data),
+  onError: ({ error }) => console.error(error),
+  onSettled: () => console.log('Finished')
+})
+```
+
+When calls overlap, `isPending` stays true until all calls settle. The most recently started call controls the final `data` or `error`. `reset()` returns the observable state to idle.
+
+### Deduplicating concurrent mutations
+
+Return a stable Convex value from `dedupe`. Concurrent calls with the same value share one request.
+
+```tsx
+const saveTask = useMutation(api.tasks.save, {
+  dedupe: ({ args }) => args.id
+})
+```
+
+### Updating query data optimistically
+
+```tsx
+const createTask = useMutation(api.tasks.create, {
+  optimistic: ({ data, optimisticId, store }) =>
+    store.get(api.tasks.list, { listId: data.listId }).append({
+      _id: optimisticId,
+      _creationTime: Date.now(),
+      done: false,
+      listId: data.listId,
+      title: data.title
+    })
+})
+```
+
+Optimistic changes reconcile on success and roll back on failure.
+
+### Retrying failures
+
+Pass `retries` in the hook options. It is the number of additional attempts.
+
+```tsx
+const createTask = useMutation(api.tasks.create, { retries: 1 })
+```
+
+## `useAction`
+
+`useAction(reference, options?)` returns a typed callable with the same lifecycle state model as `useMutation`.
+
+### Executing an action
+
+```tsx
+const formatTask = useAction(api.tasks.format, {
+  onSuccess: ({ data }) => console.log(data)
+})
+
+const formatted = await formatTask({ title: 'Write React docs' })
+```
+
+Read `formatTask.status`, `formatTask.data`, `formatTask.error`, and `formatTask.isPending`, or call `formatTask.reset()`.
+
+### Deduplicating concurrent calls
+
+Return a stable Convex value from `dedupe`. Concurrent calls to the same action with the same value share one in-flight request.
+
+```tsx
+const formatTask = useAction(api.tasks.format, {
+  dedupe: ({ args }) => args.title
+})
+```
+
+The key is released when the action settles. Deduplication is local to this client instance, so it prevents concurrent duplicate calls but is not durable idempotency and does not make retries safe.
+
+### Retrying failures
+
+Action retries are disabled by default (`retries: 0`). Pass `retries` in the hook options to request additional attempts, but only do this when the action is idempotent or implements its own idempotency key. Actions can perform external side effects, and a failed attempt may have completed those effects before reporting the failure; retrying can therefore repeat them.
+
+```tsx
+const formatTask = useAction(api.tasks.format, {
+  retries: 2 // Only safe when this action is idempotent.
+})
+```
+
+## `usePrefetchQuery`
+
+`usePrefetchQuery(reference)` returns a typed prefetch function. Each call returns `{ ready, cancel }`.
+
+```tsx
+import type { Id } from '../convex/_generated/dataModel'
+
+const prefetchTask = usePrefetchQuery(api.tasks.get)
+const { ready, cancel } = prefetchTask({ id })
+
+void ready.catch(() => undefined)
+```
+
+`ready` resolves with the query data. `cancel()` rejects an unfinished prefetch with an `AbortError` and releases it.
+
+## `usePreloadedQuery`
+
+`usePreloadedQuery(payload)` hydrates a query fetched on the server. It returns the embedded server result immediately, subscribes with the payload's function reference and arguments, and returns live values after the browser client connects.
+
+```tsx
+import type { PreloadedQuery } from 'convex-pulse/react'
+
+function TaskList({ preloadedTasks }: TaskListProps) {
+  const tasks = usePreloadedQuery(preloadedTasks)
+  return tasks.map((task) => <p key={task._id}>{task.title}</p>)
+}
+
+type TaskListProps = Readonly<{
+  preloadedTasks: PreloadedQuery<typeof api.tasks.list>
+}>
+```
+
+Create the payload with `ConvexPulseHttpClient.preloadQuery()` or the Next.js `preloadQuery()` helper. Query errors are thrown so an error boundary can handle them. See the [server rendering guide](/docs/guides/server-rendering).
+
+## Component cleanup
+
+Query, mutation, and action hooks release their subscriptions when their component unmounts. Cancel a component-owned prefetch if it should not remain warm after unmounting:
+
+```tsx
+import { useEffect, useRef } from 'react'
+
+import type { Id } from '../convex/_generated/dataModel'
+
+const cancelPrefetch = useRef<(() => void) | null>(null)
+const prefetchTask = usePrefetchQuery(api.tasks.get)
+
+useEffect(() => () => cancelPrefetch.current?.(), [])
+
+function warmTask(id: Id<'task'>) {
+  cancelPrefetch.current?.()
+  const handle = prefetchTask({ id })
+  cancelPrefetch.current = handle.cancel
+  void handle.ready.catch(() => undefined)
+}
+```
+
+Do not close the shared browser client from an ordinary component: `close()` is permanent. Close it only when the complete application host is being destroyed.
+
+## Direct client methods
+
+`ConvexPulseReactClient` also exposes `setAuth`, `clearAuth`, `action`, `prepareQuery`, `mutation`, `prefetch`, `devtools`, and `close`. Its constructor accepts `fetchToken` and `gcTime`. Prefer hooks inside components when you need reactive lifecycle state; use direct methods for imperative and framework-independent integrations.

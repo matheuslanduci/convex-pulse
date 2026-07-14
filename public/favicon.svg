@@ -1,0 +1,21 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="180 140 175 225"
+  fill="none"
+>
+  <style>
+    :root { color: #111111; }
+    @media (prefers-color-scheme: dark) {
+      :root { color: #ffffff; }
+    }
+  </style>
+  <g
+    stroke="currentColor"
+    stroke-width="11"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M191 202c0-29 23-51 52-51h36c38 0 64 28 64 65s-27 71-64 71h-30" />
+    <path d="M191 353V239h46l21-46 17 71 17-27h24" />
+  </g>
+</svg>

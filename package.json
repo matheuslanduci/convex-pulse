@@ -1,0 +1,206 @@
+{
+  "name": "convex-pulse",
+  "version": "0.0.0",
+  "description": "A better Convex client for web",
+  "license": "MIT",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "imports": {
+    "#angular/*.js": "./angular/*.ts",
+    "#client/*.js": "./client/*.ts",
+    "#devtools/*.js": "./devtools/*.ts",
+    "#http/*.js": "./http/*.ts",
+    "#nextjs/*.js": "./nextjs/*.ts",
+    "#node/*.js": "./node/*.ts",
+    "#react/*.js": "./react/*.ts",
+    "#solid/*.js": "./solid/*.ts",
+    "#svelte/*.js": "./svelte/*.ts",
+    "#sveltekit/*.js": "./sveltekit/*.ts",
+    "#testkit/*.js": "./testkit/*.ts",
+    "#vue/*.js": "./vue/*.ts"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./angular": {
+      "types": "./dist/angular/index.d.ts",
+      "import": "./dist/angular/index.js"
+    },
+    "./devtools": {
+      "types": "./dist/devtools/index.d.ts",
+      "import": "./dist/devtools/index.js"
+    },
+    "./http": {
+      "types": "./dist/http/index.d.ts",
+      "import": "./dist/http/index.js"
+    },
+    "./nextjs": {
+      "types": "./dist/nextjs/index.d.ts",
+      "import": "./dist/nextjs/index.js"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js"
+    },
+    "./solid": {
+      "types": "./dist/solid/index.d.ts",
+      "import": "./dist/solid/index.js"
+    },
+    "./svelte": {
+      "types": "./dist/svelte/index.d.ts",
+      "svelte": "./dist/svelte/index.svelte.js",
+      "import": "./dist/svelte/index.js"
+    },
+    "./sveltekit": {
+      "types": "./dist/sveltekit/index.d.ts",
+      "svelte": "./dist/sveltekit/index.svelte.js",
+      "import": "./dist/sveltekit/index.js"
+    },
+    "./sveltekit/server": {
+      "types": "./dist/sveltekit/server.d.ts",
+      "import": "./dist/sveltekit/server.js"
+    },
+    "./vue": {
+      "types": "./dist/vue/index.d.ts",
+      "import": "./dist/vue/index.js"
+    }
+  },
+  "scripts": {
+    "benchmark": "pnpm --dir benchmarks benchmark",
+    "benchmark:node": "pnpm benchmark:node:local && pnpm benchmark:node:cloud && pnpm benchmark:node:docker",
+    "benchmark:node:cloud": "node benchmarks/run-benchmarks.mjs cloud",
+    "benchmark:node:docker": "node benchmarks/run-benchmarks.mjs self-hosted",
+    "benchmark:node:local": "node benchmarks/run-benchmarks.mjs local",
+    "benchmark:react": "pnpm benchmark:react:local && pnpm benchmark:react:cloud && pnpm benchmark:react:docker",
+    "benchmark:react:cloud": "node benchmarks/run-benchmarks.mjs cloud react",
+    "benchmark:react:docker": "node benchmarks/run-benchmarks.mjs self-hosted react",
+    "benchmark:react:local": "node benchmarks/run-benchmarks.mjs local react",
+    "benchmark:sync-hotpaths": "node --experimental-strip-types scripts/benchmark-sync-hotpaths.ts",
+    "benchmark:vue": "pnpm benchmark:vue:local && pnpm benchmark:vue:cloud && pnpm benchmark:vue:docker",
+    "benchmark:vue:cloud": "node benchmarks/run-benchmarks.mjs cloud vue",
+    "benchmark:vue:docker": "node benchmarks/run-benchmarks.mjs self-hosted vue",
+    "benchmark:vue:local": "node benchmarks/run-benchmarks.mjs local vue",
+    "build": "pnpm build:svelte-runes && tsup && tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
+    "build:svelte-runes": "node scripts/build-svelte-runes.mjs",
+    "check": "ultracite check",
+    "docs:build": "blume build --isolated",
+    "docs:dev": "blume dev",
+    "docs:preview": "BLUME_RUNTIME_DIR=.blume-verify blume preview",
+    "fix": "ultracite fix",
+    "prepack": "pnpm build",
+    "storybook": "storybook dev -p 6006",
+    "storybook:build": "storybook build",
+    "test:node": "vitest run --project node",
+    "test:http": "vitest run --project http",
+    "test:angular": "vitest run --project angular",
+    "test:devtools": "vitest run --project devtools",
+    "test:docs": "pnpm test:docs:unit && pnpm test:docs:e2e",
+    "test:docs:e2e": "node scripts/test-docs.mjs",
+    "test:docs:unit": "vitest run --project docs",
+    "test:sync": "vitest run --project sync",
+    "test:react": "vitest run --project react",
+    "test:solid": "vitest run --project solid",
+    "test:svelte": "pnpm build:svelte-runes && vitest run --project svelte",
+    "test:vue": "vitest run --project vue",
+    "test:package": "pnpm test:package:unit && pnpm test:package:e2e",
+    "test:package:e2e": "node scripts/test-package.mjs",
+    "test:package:unit": "vitest run --project package",
+    "test:e2e": "pnpm test:e2e:docker && pnpm test:e2e:local && pnpm test:e2e:cloud",
+    "test:e2e:cloud": "node tests/e2e/run-e2e.mjs cloud",
+    "test:e2e:angular": "pnpm --dir tests/e2e test:angular",
+    "test:e2e:docker": "node tests/e2e/run-e2e.mjs self-hosted",
+    "test:e2e:local": "node tests/e2e/run-e2e.mjs local",
+    "test:e2e:nextjs": "pnpm --dir tests/e2e test:nextjs",
+    "test:e2e:remote-docker": "node tests/e2e/run-e2e.mjs remote-docker",
+    "test:e2e:remote-docker:angular": "node tests/e2e/run-e2e.mjs remote-docker angular",
+    "test:e2e:remote-docker:nextjs": "node tests/e2e/run-e2e.mjs remote-docker nextjs",
+    "test:e2e:remote-docker:node": "node tests/e2e/run-e2e.mjs remote-docker node",
+    "test:e2e:remote-docker:react": "node tests/e2e/run-e2e.mjs remote-docker react",
+    "test:e2e:remote-docker:solid": "node tests/e2e/run-e2e.mjs remote-docker solid",
+    "test:e2e:remote-docker:svelte": "node tests/e2e/run-e2e.mjs remote-docker svelte",
+    "test:e2e:remote-docker:sveltekit": "node tests/e2e/run-e2e.mjs remote-docker sveltekit",
+    "test:e2e:remote-docker:tanstack-start": "node tests/e2e/run-e2e.mjs remote-docker tanstack-start",
+    "test:e2e:remote-docker:vue": "node tests/e2e/run-e2e.mjs remote-docker vue",
+    "test:e2e:react": "pnpm --dir tests/e2e test:react",
+    "test:e2e:solid": "pnpm --dir tests/e2e test:solid",
+    "test:e2e:svelte": "pnpm --dir tests/e2e test:svelte",
+    "test:e2e:sveltekit": "pnpm --dir tests/e2e test:sveltekit",
+    "test:e2e:tanstack-start": "pnpm --dir tests/e2e test:tanstack-start",
+    "test:e2e:vue": "pnpm --dir tests/e2e test:vue",
+    "test:e2e:self-hosted": "node tests/e2e/run-e2e.mjs self-hosted",
+    "typecheck": "tsc --noEmit && pnpm --dir tests/e2e typecheck && tsc --noEmit -p examples/node/tsconfig.json && pnpm --dir benchmarks typecheck"
+  },
+  "devDependencies": {
+    "@angular/compiler": "^22.0.6",
+    "@angular/core": "^22.0.6",
+    "@angular/platform-browser": "^22.0.6",
+    "@astrojs/react": "6.0.0",
+    "@astrojs/svelte": "9.0.0",
+    "@astrojs/vue": "7.0.0",
+    "@storybook/addon-a11y": "^10.5.0",
+    "@storybook/react-vite": "^10.5.0",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitest/coverage-v8": "4.1.10",
+    "astro": "7.0.2",
+    "blume": "1.0.3",
+    "convex": "1.42.1",
+    "esbuild": "^0.28.1",
+    "jsdom": "^26.1.0",
+    "oxfmt": "0.58.0",
+    "oxlint": "1.73.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "rxjs": "^7.8.2",
+    "solid-js": "^1.9.14",
+    "storybook": "^10.5.0",
+    "svelte": "^5.56.4",
+    "tsc-alias": "^1.9.1",
+    "tsup": "^8.5.1",
+    "typescript": "7.0.2",
+    "ultracite": "7.9.3",
+    "vitest": "4.1.10",
+    "vue": "^3.5.39"
+  },
+  "peerDependencies": {
+    "@angular/core": ">=20",
+    "convex": ">=1.42.1 <2",
+    "react": ">=18",
+    "solid-js": ">=1.8",
+    "svelte": ">=5",
+    "vue": ">=3.4"
+  },
+  "peerDependenciesMeta": {
+    "@angular/core": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "solid-js": {
+      "optional": true
+    },
+    "svelte": {
+      "optional": true
+    },
+    "vue": {
+      "optional": true
+    }
+  },
+  "pnpm": {
+    "overrides": {
+      "postcss@<8.5.10": "8.5.17",
+      "srvx@<0.11.13": "0.11.22"
+    }
+  }
+}

@@ -1,0 +1,7 @@
+.vscode
+.zed
+node_modules
+.context
+.blume
+.blume-verify
+coverage

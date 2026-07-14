@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          cache: pnpm
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm typecheck
+      - run: pnpm exec vitest run --project node --project http --project angular --project devtools --project sync --project react --project solid --project svelte --project vue
+      - run: pnpm test:package
+      - run: pnpm test:docs
+      - run: pnpm storybook:build
+      - run: pnpm audit --prod --audit-level moderate

@@ -1,0 +1,21 @@
+{
+  "name": "node",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#convex/api": "./convex/_generated/api.js"
+  },
+  "scripts": {
+    "dev": "convex dev --start 'node --experimental-strip-types index.ts'",
+    "start": "node --env-file=.env.local --experimental-strip-types index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "convex": "1.42.1",
+    "convex-pulse": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3"
+  }
+}

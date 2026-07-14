@@ -1,0 +1,38 @@
+name: End-to-end
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 5 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [self-hosted, local, cloud]
+    env:
+      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+      E2E_CLOUD_ENV: ${{ secrets.E2E_CLOUD_ENV }}
+      E2E_LOCAL_ENV: ${{ secrets.E2E_LOCAL_ENV }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          cache: pnpm
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Configure cloud deployment
+        if: matrix.target == 'cloud'
+        run: printenv E2E_CLOUD_ENV > tests/e2e/.env.e2e.cloud
+      - name: Configure local deployment
+        if: matrix.target == 'local'
+        run: printenv E2E_LOCAL_ENV > tests/e2e/.env.e2e.local
+      - run: node tests/e2e/run-e2e.mjs ${{ matrix.target }}

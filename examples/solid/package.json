@@ -1,0 +1,27 @@
+{
+  "name": "solid",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#convex/api": "./convex/_generated/api.js",
+    "#convex/dataModel": "./convex/_generated/dataModel.d.ts"
+  },
+  "scripts": {
+    "dev": "convex dev --start 'vite'",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@solidjs/router": "^0.15.0",
+    "convex": "1.42.1",
+    "convex-pulse": "workspace:*",
+    "solid-js": "^1.9.13"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.2",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.1",
+    "vite-plugin-solid": "^2.11.12"
+  }
+}

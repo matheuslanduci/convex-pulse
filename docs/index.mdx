@@ -1,0 +1,69 @@
+---
+title: Introduction
+description: A typed, reactive Convex client for JavaScript and modern UI frameworks.
+---
+
+Convex Pulse is a family of typed clients for calling Convex functions and subscribing to live query results. It adds explicit query state, retries, prefetching, mutation lifecycle state, deduplication, optimistic collection operations, and a client inspector while preserving the generated Convex API types you already use.
+
+## Install
+
+Install Convex Pulse together with its required Convex peer dependency:
+
+```bash
+pnpm add convex-pulse convex
+```
+
+Your Convex functions and generated `convex/_generated/api` module do not need to change.
+
+## Choose a client
+
+| Application | Import | Primary API |
+| --- | --- | --- |
+| JavaScript or Node.js | `convex-pulse` | `ConvexPulseClient` |
+| Server rendering or serverless | `convex-pulse/http` | `ConvexPulseHttpClient`, preloaded queries |
+| Next.js App Router | `convex-pulse/nextjs` | Server fetch and preload helpers |
+| React | `convex-pulse/react` | `ConvexPulseReactClient`, hooks, provider |
+| Angular | `convex-pulse/angular` | `ConvexPulseAngularClient`, injection functions |
+| Solid | `convex-pulse/solid` | `ConvexPulseSolidClient`, reactive primitives |
+| Svelte | `convex-pulse/svelte` | `ConvexPulseSvelteClient`, readable stores |
+| Vue | `convex-pulse/vue` | `ConvexPulseVueClient`, composables |
+| Any browser client | `convex-pulse/devtools` | Client inspector |
+
+Every reactive framework client shares the same connection, authentication, cache, mutation, prefetch, and cleanup behavior. Its framework binding determines how query and mutation state is exposed. The framework-neutral JavaScript client instead exposes promises, callbacks, and async iterables. The HTTP client performs one HTTP request for each operation but retains authentication and a mutation queue, so do not share it between concurrent server requests.
+
+## Start here
+
+Read [How to use Convex Pulse](/docs/usage) for the shared mental model and a complete React example. Then open the API page for your client:
+
+- [JavaScript and Node.js](/docs/libraries/javascript)
+- [HTTP](/docs/libraries/http)
+- [Next.js](/docs/libraries/nextjs)
+- [React](/docs/libraries/react)
+- [Angular](/docs/libraries/angular)
+- [Solid](/docs/libraries/solid)
+- [Svelte](/docs/libraries/svelte)
+- [Vue](/docs/libraries/vue)
+- [Devtools](/docs/libraries/devtools)
+
+For immediate mutation feedback and rollback behavior, read the [optimistic updates guide](/docs/guides/optimistic-updates).
+
+For server rendering with Next.js, TanStack Start, or SvelteKit, read the [server rendering guide](/docs/guides/server-rendering).
+
+Already use the official Convex clients? Follow the [migration guide](/docs/migration) for the signature and state-model changes.
+
+## What is shared
+
+All clients preserve end-to-end types from generated Convex function references and support queries, mutations, actions, authentication, and deterministic cleanup.
+
+The React, Angular, Solid, Svelte, and Vue clients additionally support:
+
+- Live queries with pending, success, error, and disabled states.
+- Paginated queries and explicit `loadMore` controls.
+- Mutations with lifecycle callbacks, retries, deduplication, and optimistic updates.
+- Query prefetching with cancellation.
+- Actions with lifecycle state, authentication token refresh, and cache garbage collection.
+- The same Devtools handle for inspecting queries, actions, mutations, and optimistic layers.
+
+The framework-neutral `ConvexPulseClient` provides one-off query promises, callback subscriptions, async iterables, paginated subscriptions, direct mutations and actions, retries, deduplication, and optimistic updates. It does not expose framework lifecycle state or a prefetch API.
+
+The HTTP and Next.js clients provide non-reactive queries, mutations, and actions on the server. They can also preload a query result that React or Svelte hydrates immediately and then keeps live.

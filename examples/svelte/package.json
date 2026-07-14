@@ -1,0 +1,27 @@
+{
+  "name": "svelte",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#convex/api": "./convex/_generated/api.js",
+    "#convex/dataModel": "./convex/_generated/dataModel.d.ts"
+  },
+  "scripts": {
+    "dev": "convex dev --start 'vite'",
+    "build": "pnpm check && vite build",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "convex": "1.42.1",
+    "convex-pulse": "workspace:*",
+    "svelte": "^5.0.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.0.0",
+    "svelte-check": "^4.0.0",
+    "typescript": "~6.0.0",
+    "vite": "^8.0.0"
+  }
+}

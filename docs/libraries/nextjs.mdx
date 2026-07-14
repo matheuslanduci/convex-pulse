@@ -1,0 +1,239 @@
+---
+title: Next.js
+description: Fetch and preload Convex data in Next.js Server Components, Server Functions, and Route Handlers.
+---
+
+The `convex-pulse/nextjs` helpers make one HTTP request per operation and set `cache: 'no-store'`. They read `NEXT_PUBLIC_CONVEX_URL` by default, or accept an explicit `url` option.
+
+## Setup
+
+Create an App Router project and initialize Convex:
+
+```bash
+pnpm create next-app@latest my-app --ts --app --use-pnpm --yes
+cd my-app
+pnpm add convex-pulse convex
+pnpm exec convex dev
+```
+
+Add the backend from [Before you start](/docs/usage#before-you-start). The first `convex dev` run generates `convex/_generated/api` and writes `NEXT_PUBLIC_CONVEX_URL` to `.env.local` after you create or select a deployment.
+
+## Provide the browser client
+
+Create one browser client in a Client Component module. Keeping it at module scope preserves the connection across client-side navigation.
+
+```tsx title="app/convex-client-provider.tsx"
+'use client'
+
+import {
+  ConvexPulseReactClient,
+  ConvexPulseReactProvider
+} from 'convex-pulse/react'
+import type { ReactNode } from 'react'
+
+const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL
+if (convexUrl === undefined) {
+  throw new Error('NEXT_PUBLIC_CONVEX_URL is not set')
+}
+
+const convex = new ConvexPulseReactClient(convexUrl)
+
+export function ConvexClientProvider({ children }: ProviderProps) {
+  return (
+    <ConvexPulseReactProvider convex={convex}>
+      {children}
+    </ConvexPulseReactProvider>
+  )
+}
+
+type ProviderProps = Readonly<{ children: ReactNode }>
+```
+
+Place it in the root layout so every live Client Component uses the same client:
+
+```tsx title="app/layout.tsx"
+import type { ReactNode } from 'react'
+
+import { ConvexClientProvider } from './convex-client-provider'
+
+export default function RootLayout({ children }: RootLayoutProps) {
+  return (
+    <html lang="en">
+      <body>
+        <ConvexClientProvider>{children}</ConvexClientProvider>
+      </body>
+    </html>
+  )
+}
+
+type RootLayoutProps = Readonly<{ children: ReactNode }>
+```
+
+## Preload a reactive Client Component
+
+Call `preloadQuery` in a Server Component:
+
+```tsx title="app/page.tsx"
+import { preloadQuery } from 'convex-pulse/nextjs'
+
+import { api } from '@/convex/_generated/api'
+import { Tasks } from './tasks'
+
+export default async function Page() {
+  const preloadedTasks = await preloadQuery(api.tasks.list, {
+    args: { listId: 'default' }
+  })
+
+  return <Tasks preloadedTasks={preloadedTasks} />
+}
+```
+
+Pass the serializable payload to a Client Component. `usePreloadedQuery` returns the server value immediately and keeps the query live after the browser client connects:
+
+```tsx title="app/tasks.tsx"
+'use client'
+
+import { usePreloadedQuery } from 'convex-pulse/react'
+import type { PreloadedQuery } from 'convex-pulse/react'
+
+import { api } from '@/convex/_generated/api'
+
+export function Tasks({ preloadedTasks }: TasksProps) {
+  const tasks = usePreloadedQuery(preloadedTasks)
+
+  return tasks.map((task) => <p key={task._id}>{task.title}</p>)
+}
+
+type TasksProps = Readonly<{
+  preloadedTasks: PreloadedQuery<typeof api.tasks.list>
+}>
+```
+
+`PreloadedQuery` is exported from both `convex-pulse/react` and `convex-pulse/nextjs`. Import `preloadedQueryResult` from `convex-pulse/nextjs` when server code needs to inspect the embedded result. The lower-level `preloadedQueryArgs` and `createPreloadedQuery` helpers belong to `convex-pulse/http`.
+
+## Fetch without a live subscription
+
+Use `fetchQuery` in a Server Component. Put mutations and actions behind a Server Function or Route Handler instead of importing server helpers into a Client Component:
+
+```ts title="app/tasks-actions.ts"
+'use server'
+
+import { fetchAction, fetchMutation } from 'convex-pulse/nextjs'
+
+import { api } from '@/convex/_generated/api'
+
+export async function createTask(title: string) {
+  return fetchMutation(api.tasks.create, {
+    args: { listId: 'default', title }
+  })
+}
+
+export async function formatTask(title: string) {
+  return fetchAction(api.tasks.format, { args: { title } })
+}
+```
+
+```tsx title="app/server-tasks.tsx"
+import { fetchQuery } from 'convex-pulse/nextjs'
+
+import { api } from '@/convex/_generated/api'
+
+export async function ServerTasks() {
+  const tasks = await fetchQuery(api.tasks.list, {
+    args: { listId: 'default' }
+  })
+
+  return tasks.map((task) => <p key={task._id}>{task.title}</p>)
+}
+```
+
+## Authentication
+
+Configure your provider's JWT issuer and audience in `convex/auth.config.ts` by following the official [Convex authentication guides](https://docs.convex.dev/auth). Next.js has two separate Convex clients to authenticate: server helpers need a token string for each call, while the browser provider needs a token fetcher for its live connection.
+
+### Server-side authentication
+
+Fetch an OpenID Connect identity JWT on the server and pass it as `token`. The token applies only to that helper call and should not be passed to a Client Component separately. For example, with Clerk:
+
+```ts title="app/auth.ts"
+import { auth } from '@clerk/nextjs/server'
+
+export async function getAuthToken() {
+  return (await (await auth()).getToken()) ?? undefined
+}
+```
+
+```tsx title="app/page.tsx"
+import { preloadQuery } from 'convex-pulse/nextjs'
+
+import { api } from '@/convex/_generated/api'
+import { getAuthToken } from './auth'
+import { Tasks } from './tasks'
+
+export default async function Page() {
+  const token = await getAuthToken()
+  const preloadedTasks = await preloadQuery(api.tasks.list, {
+    args: { listId: 'default' },
+    token
+  })
+
+  return <Tasks preloadedTasks={preloadedTasks} />
+}
+```
+
+Use the equivalent server SDK for another auth provider. Request a token inside each Server Component, Server Function, or Route Handler rather than storing one in module scope. Omitting `token` makes only that helper call anonymous.
+
+### Browser authentication
+
+Authentication is separate in the browser. For example, with Clerk, read its client-side session in `app/convex-client-provider.tsx` and pass a stable token fetcher only while the user is signed in:
+
+```tsx title="app/convex-client-provider.tsx"
+'use client'
+
+import { useAuth } from '@clerk/nextjs'
+import {
+  ConvexPulseReactClient,
+  ConvexPulseReactProvider
+} from 'convex-pulse/react'
+import { useCallback } from 'react'
+import type { ReactNode } from 'react'
+
+const convex = new ConvexPulseReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!)
+
+export function ConvexClientProvider({ children }: ProviderProps) {
+  const { getToken, isLoaded, isSignedIn } = useAuth()
+  const fetchToken = useCallback(
+    ({ forceRefreshToken }: { forceRefreshToken: boolean }) =>
+      getToken({ skipCache: forceRefreshToken }),
+    [getToken]
+  )
+
+  return (
+    <ConvexPulseReactProvider
+      convex={convex}
+      fetchToken={isLoaded && isSignedIn ? fetchToken : undefined}
+      isAuthLoading={!isLoaded}
+    >
+      {children}
+    </ConvexPulseReactProvider>
+  )
+}
+
+type ProviderProps = Readonly<{ children: ReactNode }>
+```
+
+Place Clerk's provider above this component in the layout. `isAuthLoading` prevents descendants from subscribing anonymously while Clerk resolves its initial session, and the provider waits for Convex to confirm an authenticated token before mounting them. Use the equivalent client hook for another auth provider. Removing `fetchToken` on sign-out returns the live client to the anonymous identity and clears identity-scoped query state. A preloaded authenticated result does not authenticate the live browser connection.
+
+## Rendering, errors, and cleanup
+
+The helpers' `cache: 'no-store'` request opts the consuming route out of cached static rendering, so an additional `dynamic = 'force-dynamic'` export or `connection()` call is not required. The request runs during dynamic rendering. Do not place a helper call inside a `'use cache'` scope.
+
+Helper promises reject for Convex function or transport errors. In a Server Component, let the error reach the nearest Next.js `error.tsx` boundary or catch it when the page has a meaningful local fallback. `usePreloadedQuery` returns the server value initially and throws a later live-query error to the nearest React error boundary.
+
+Server helpers create short-lived HTTP clients and need no cleanup. A normal App Router application also performs no explicit browser-client cleanup: keep the root client open across navigation, and do not close it from a page, layout child, or ordinary component. The browser releases the connection when the page itself goes away.
+
+## Options and consistency
+
+Every helper accepts `url`, `token`, and `skipConvexDeploymentUrlCheck` alongside `args`; mutations also accept `skipQueue`. `preloadedQueryResult(payload)` reads the embedded server result without starting another request.
+
+Separate helper calls make separate HTTP requests and are not guaranteed to observe the same database snapshot. Avoid rendering several independently preloaded values as though they were one transactionally consistent result. Return related values from one Convex query and preload it once.

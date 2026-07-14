@@ -1,0 +1,300 @@
+---
+title: Vue
+description: Vue query refs, mutations, actions, prefetching, and client injection.
+---
+
+## Setup
+
+For a new Vue project, scaffold with Vite and initialize Convex:
+
+```bash
+pnpm create vite my-app --template vue-ts
+cd my-app
+pnpm add convex-pulse convex
+pnpm exec convex dev
+```
+
+Add the backend from [Before you start](/docs/usage#before-you-start). The first `convex dev` run generates `convex/_generated/api` and writes `VITE_CONVEX_URL` to `.env.local` after you create or select a deployment.
+
+Create and export one client, then provide it to the app.
+
+```ts title="src/convex.ts"
+import { ConvexPulseVueClient } from 'convex-pulse/vue'
+
+export const convex = new ConvexPulseVueClient(import.meta.env.VITE_CONVEX_URL)
+```
+
+```ts title="src/main.ts"
+import { createApp } from 'vue'
+import { ConvexPulseVueClientKey } from 'convex-pulse/vue'
+
+import App from './App.vue'
+import { convex } from './convex'
+
+createApp(App).provide(ConvexPulseVueClientKey, convex).mount('#app')
+```
+
+Inside a setup scope, `provideConvexPulse(convex)` is an equivalent helper.
+
+### Complete client component
+
+```vue title="src/App.vue"
+<script setup lang="ts">
+import { onScopeDispose, ref } from 'vue'
+import {
+  useAction,
+  useMutation,
+  usePrefetchQuery,
+  useQuery
+} from 'convex-pulse/vue'
+
+import { api } from '../convex/_generated/api'
+import type { Id } from '../convex/_generated/dataModel'
+
+const listId = 'default'
+const title = ref('Vue task')
+const tasksEnabled = ref(true)
+const tasks = useQuery(api.tasks.list, {
+  args: { listId },
+  enabled: tasksEnabled
+})
+const createTask = useMutation(api.tasks.create)
+const formatTask = useAction(api.tasks.format)
+const prefetchTask = usePrefetchQuery(api.tasks.get)
+let cancelPrefetch: (() => void) | undefined
+
+onScopeDispose(() => cancelPrefetch?.())
+
+function warmTask(id: Id<'task'>) {
+  cancelPrefetch?.()
+  const handle = prefetchTask({ id })
+  cancelPrefetch = handle.cancel
+  void handle.ready.catch(() => undefined)
+}
+
+async function addTask() {
+  await createTask({ listId, title: title.value })
+  title.value = ''
+}
+</script>
+
+<template>
+  <main>
+    <input v-model="title" aria-label="Task title" />
+    <button :disabled="createTask.isPending" type="button" @click="addTask">
+      Create task
+    </button>
+    <button
+      :disabled="formatTask.isPending"
+      type="button"
+      @click="formatTask({ title }).catch(() => undefined)"
+    >
+      Format title
+    </button>
+    <label>
+      <input v-model="tasksEnabled" type="checkbox" />
+      Subscribe to tasks
+    </label>
+    <p v-if="tasks.status === 'pending'">Loading…</p>
+    <p v-else-if="tasks.status === 'error'">Could not load tasks</p>
+    <p v-else-if="tasks.status === 'disabled'">Disabled</p>
+    <ul v-else>
+      <li v-for="task in tasks.data" :key="task._id">
+        <button type="button" @mouseenter="warmTask(task._id)">
+          {{ task.title }}
+        </button>
+      </li>
+    </ul>
+  </main>
+</template>
+```
+
+## `useQuery`
+
+`useQuery(reference, options)` returns a readonly shallow ref and releases its subscription with the current Vue effect scope.
+
+### Fetching and selecting data
+
+```ts
+const openTasks = useQuery(api.tasks.list, {
+  args: { listId },
+  select: (tasks) => tasks.filter((task) => !task.done)
+})
+```
+
+Arguments go under `args` as a value, ref, computed ref, or getter. When their value changes, Pulse releases the previous subscription and prepares the new query. Return `skipToken` to unsubscribe without inventing placeholder arguments. `select` derives the successful `data` value.
+
+```ts
+import { skipToken, useQuery } from 'convex-pulse/vue'
+
+const task = useQuery(api.tasks.get, {
+  args: () => (taskId.value === undefined ? skipToken : { id: taskId.value })
+})
+```
+
+### Handling query state
+
+```ts
+watchEffect(() => {
+  const result = openTasks.value
+  if (result.status === 'success') console.log(result.data)
+  if (result.status === 'error') console.error(result.error)
+})
+```
+
+The ref contains `pending`, `error`, `success`, or `disabled` state. Set `throwOnError: true` to throw query failures while reading `.value` so Vue error boundaries can handle them. With this option, the returned type does not include the error-state branch.
+
+### Disabling and retrying
+
+`enabled` accepts a value, ref, or getter. `retries` is the number of additional attempts.
+
+```ts
+const task = useQuery(api.tasks.get, {
+  args: { id: taskId },
+  enabled: isTaskVisible,
+  retries: 2
+})
+```
+
+### Observing data changes
+
+Pass `onDataChange` in the options or call `useOnDataChange(query, listener)`. It receives `{ next, previous }` after the initial successful result changes. The standalone helper watches the query ref immediately and stops automatically with the current effect scope:
+
+```ts
+import { useOnDataChange } from 'convex-pulse/vue'
+
+useOnDataChange(openTasks, ({ next, previous }) => {
+  console.log({ next, previous })
+})
+```
+
+### Loading paginated data
+
+```ts
+const tasks = useQuery(api.tasks.listPaginated, {
+  args: { listId },
+  pagination: { initialNumItems: 20 }
+})
+```
+
+Successful pagination state exposes `canLoadMore`, `isLoading`, `isLoadingMore`, and `loadMore(numItems)`. Paginated queries do not support `select`.
+
+## `useMutation`
+
+### Executing and observing a mutation
+
+```ts
+const createTask = useMutation(api.tasks.create, {
+  onSuccess: ({ data }) => console.log('Created', data),
+  retries: 1
+})
+
+await createTask({ listId, title: 'Vue docs' })
+console.log(createTask.status, createTask.isPending)
+```
+
+The callable exposes `status`, `data`, `error`, `isPending`, and `reset()`, plus all mutation lifecycle callbacks.
+
+### Deduplicating and updating optimistically
+
+```ts
+const createTask = useMutation(api.tasks.create, {
+  dedupe: ({ args }) => args.title,
+  optimistic: ({ data, optimisticId, store }) =>
+    store.get(api.tasks.list, { listId: data.listId }).append({
+      _id: optimisticId,
+      _creationTime: Date.now(),
+      done: false,
+      listId: data.listId,
+      title: data.title
+    })
+})
+```
+
+## `useAction`
+
+`useAction(reference, options?)` returns a typed callable with reactive lifecycle state.
+
+### Executing and retrying an action
+
+```ts
+const formatTask = useAction(api.tasks.format, {
+  retries: 2 // Only safe when this action is idempotent.
+})
+const formatted = await formatTask({ title: 'Vue docs' })
+```
+
+Set `dedupe: ({ args }) => args.title` in the action options to share one in-flight request between concurrent calls with the same value. The key is released when the action settles. Deduplication is local to this client instance, so it is not durable idempotency and does not make retries safe.
+
+Action retries are disabled by default (`retries: 0`). Only set `retries` above zero when the action is idempotent or implements its own idempotency key. Actions can perform external side effects, and a failed attempt may have completed those effects before reporting the failure; retrying can therefore repeat them.
+
+Read `formatTask.status`, `formatTask.data`, `formatTask.error`, and `formatTask.isPending`, or call `formatTask.reset()`.
+
+## `usePrefetchQuery`
+
+`usePrefetchQuery(reference)` returns a typed prefetch function. Each call returns `{ ready, cancel }`; canceling an unfinished prefetch rejects `ready` with an `AbortError`.
+
+```ts
+import { onScopeDispose } from 'vue'
+
+import type { Id } from '../convex/_generated/dataModel'
+
+const prefetchTask = usePrefetchQuery(api.tasks.get)
+let cancelPrefetch: (() => void) | undefined
+
+onScopeDispose(() => cancelPrefetch?.())
+
+function warmTask(id: Id<'task'>) {
+  cancelPrefetch?.()
+  const handle = prefetchTask({ id })
+  cancelPrefetch = handle.cancel
+  void handle.ready.catch(() => undefined)
+}
+```
+
+Vue disposes query subscriptions automatically. A prefetch handle is imperative, so retain and cancel it with `onScopeDispose` when it belongs to a component or composable.
+
+## Authentication
+
+First configure your provider's JWT issuer and audience in `convex/auth.config.ts` by following the official [Convex authentication guides](https://docs.convex.dev/auth). Convex Pulse does not create sessions or tokens; it sends the identity JWT returned by your auth SDK to Convex.
+
+After the auth SDK reports that the user is signed in, configure the client with a programmatic token fetcher. Pass `forceRefreshToken` through as the SDK's cache-bypass option:
+
+```ts
+convex.setAuth(
+  ({ forceRefreshToken }) => getToken({ skipCache: forceRefreshToken }),
+  {
+    onChange: (isAuthenticated) => console.log({ isAuthenticated }),
+    onError: (error) => console.error(error),
+    onRefreshChange: (isRefreshing) => console.log({ isRefreshing })
+  }
+)
+```
+
+Call `convex.clearAuth()` when the user signs out. This returns the client to the anonymous identity and clears identity-scoped cached and optimistic state. Do not leave a fetcher installed if it can no longer return a token.
+
+If the application only creates the client after the auth SDK has a signed-in session, the constructor option is equivalent:
+
+```ts
+const authenticatedConvex = new ConvexPulseVueClient(
+  import.meta.env.VITE_CONVEX_URL,
+  {
+    fetchToken: ({ forceRefreshToken }) =>
+      getToken({ skipCache: forceRefreshToken })
+  }
+)
+```
+
+In a Vue application, watch the auth SDK's signed-in state from the app bootstrap or an app-scoped composable and call `setAuth` or `clearAuth` when it changes. Keep the token callback and the shared client stable; do not reconfigure authentication from each component.
+
+## Server rendering
+
+Vue supports live client queries and imperative prefetching. Convex Pulse does not currently expose a Vue equivalent of React's or Svelte's serialized preloaded-query hydration API. Do not serialize the result of `usePrefetchQuery` into server-rendered HTML; let the client query subscribe after hydration.
+
+## Cleanup
+
+Vue query primitives release their subscriptions with the current effect scope. The shared client normally lives for the page lifetime; do not close it from an ordinary component. If an embedding host explicitly unmounts the complete Vue application, call `await convex.close()` after `app.unmount()`. Closing cannot be reversed. During Vite hot-module replacement, close an old module-owned client from `import.meta.hot.dispose` before the module is replaced.
+
+## Direct client methods
+
+`ConvexPulseVueClient` also exposes `setAuth`, `clearAuth`, `action`, `prepareQuery`, `mutation`, `prefetch`, `devtools`, and `close`.

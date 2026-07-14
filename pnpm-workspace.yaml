@@ -1,0 +1,19 @@
+packages:
+  - benchmarks
+  - examples/*
+  - tests/e2e
+
+packageExtensions:
+  babel-plugin-react-compiler@1.0.0:
+    dependencies:
+      zod: ^4.3.6
+
+allowBuilds:
+  '@parcel/watcher': set this to true or false
+  esbuild: set this to true or false
+  lmdb: set this to true or false
+  msgpackr-extract: set this to true or false
+  sharp: true
+
+minimumReleaseAge: 0
+verifyDepsBeforeRun: false

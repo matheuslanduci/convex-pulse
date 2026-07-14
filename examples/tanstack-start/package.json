@@ -1,0 +1,33 @@
+{
+  "name": "tanstack-start",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#convex/api": "./convex/_generated/api.js",
+    "#src/*": "./src/*.tsx"
+  },
+  "scripts": {
+    "build": "vite build",
+    "dev": "convex dev --start 'pnpm dev:app'",
+    "dev:app": "vite dev"
+  },
+  "dependencies": {
+    "@tanstack/react-router": "^1.170.18",
+    "@tanstack/react-start": "^1.168.28",
+    "convex": "1.42.1",
+    "convex-pulse": "workspace:*",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@tanstack/router-plugin": "^1.168.20",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "nitro": "^3.0.1-alpha.2",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.4"
+  }
+}

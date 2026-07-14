@@ -1,0 +1,98 @@
+---
+title: HTTP
+description: Stateless Convex queries, mutations, actions, authentication, and preloaded query payloads.
+---
+
+`ConvexPulseHttpClient` is a non-reactive client for server rendering, serverless functions, route handlers, and scripts that do not need a persistent WebSocket connection. Each operation is an HTTP request, but the client object is stateful: it retains authentication and queues mutations. Do not share one instance between concurrent server requests belonging to different users.
+
+## Setup
+
+Install and initialize Convex as described in [Before you start](/docs/usage#before-you-start), then create the client with the generated deployment URL:
+
+```ts
+import { ConvexPulseHttpClient } from 'convex-pulse/http'
+
+const convexUrl = process.env.CONVEX_URL
+if (convexUrl === undefined) throw new Error('Missing CONVEX_URL')
+
+const client = new ConvexPulseHttpClient(convexUrl)
+```
+
+Constructor options are the options supported by the official `ConvexHttpClient`:
+
+- `auth`: a JWT for a short-lived authenticated client.
+- `fetch`: a custom Fetch API implementation.
+- `logger`: a Convex logger, `true`, or `false` to disable logging.
+- `skipConvexDeploymentUrlCheck`: disable the deployment URL shape check, commonly for self-hosted Convex.
+
+See the official [`ConvexHttpClient` reference](https://docs.convex.dev/api/classes/browser.ConvexHttpClient.html) for the upstream option contract.
+
+## Query, mutate, and act
+
+Arguments always go under `args`:
+
+```ts
+const tasks = await client.query(api.tasks.list, {
+  args: { listId }
+})
+
+const taskId = await client.mutation(api.tasks.create, {
+  args: { listId, title: 'Write HTTP docs' }
+})
+
+const formatted = await client.action(api.tasks.format, {
+  args: { title: 'Write HTTP docs' }
+})
+```
+
+Mutation options also accept `skipQueue`. By default, one client instance queues its mutations in call order. Set `skipQueue: true` only when that mutation may run immediately and concurrently with earlier mutations from the same client. HTTP calls are not reactive and do not share the live client's cache, retries, deduplication, or optimistic layers.
+
+## Authenticate a request
+
+The HTTP client accepts a token string, not an `AuthTokenFetcher` callback. Prefer a short-lived client per server request so identities cannot race:
+
+```ts
+import { ConvexPulseHttpClient } from 'convex-pulse/http'
+
+async function loadTasksForRequest() {
+  const token = await getToken()
+  const client = new ConvexPulseHttpClient(
+    process.env.CONVEX_URL!,
+    token === null || token === undefined ? {} : { auth: token }
+  )
+
+  return client.query(api.tasks.list, { args: { listId } })
+}
+```
+
+For a client that is not shared concurrently, `setAuth(token)` changes the identity for subsequent calls and `clearAuth()` returns it to the anonymous identity. There is no per-operation token option. Never call `setAuth` for different users on a shared server client, and do not expose server tokens to the browser.
+
+## Errors and retries
+
+Query, mutation, action, and preload promises reject when the Convex function or HTTP transport fails. Convex Pulse does not automatically retry HTTP operations or wrap upstream errors in a Pulse-specific error class. Handle failures at the request boundary and only retry operations that are safe to repeat; actions can perform external side effects, and a failed attempt may already have completed them.
+
+## Preload a live query
+
+`preloadQuery` executes a query and returns a JSON-serializable `PreloadedQuery` payload:
+
+```ts
+const preloadedTasks = await client.preloadQuery(api.tasks.list, {
+  args: { listId }
+})
+```
+
+Pass the payload to React's `usePreloadedQuery` or Svelte's `createPreloadedQuery`. The server result is available on the first render; after the live client connects, subsequent results replace it.
+
+Use `preloadedQueryResult(payload)` to read the embedded server value or `preloadedQueryArgs(payload)` to read its arguments. `createPreloadedQuery(reference, args, value)` creates the same transport-safe payload when a query result is already available. Convex values are encoded inside string fields, so a normal `JSON.stringify(payload)` and `JSON.parse(...)` round trip preserves supported Convex values.
+
+Treat the payload fields as private transport data: use the helper functions to read them, keep the server and browser on the same `convex-pulse` version, and do not persist preloaded payloads as a long-term storage format.
+
+Because each query is a separate HTTP operation, separate calls are not guaranteed to observe the same database snapshot. Avoid building a UI that assumes several independent preload calls are mutually consistent.
+
+## Cleanup
+
+The HTTP client opens no persistent connection and exposes no `close` or disposal method. Let a request-scoped instance be garbage-collected after its promises settle. This differs from live clients, which must close their persistent connection when their application host is disposed.
+
+## Exported types
+
+The entrypoint exports `ConvexPulseHttpClientOptions`, `HttpQueryOptions`, `HttpMutationCallOptions`, `HttpActionOptions`, and `PreloadedQuery`. Query and action options contain typed `args`; mutation options contain typed `args` and optional `skipQueue`; client options mirror the official constructor options listed above.

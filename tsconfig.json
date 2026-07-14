@@ -1,0 +1,49 @@
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "jsx": "react-jsx",
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "paths": {
+      "#*": ["./*"],
+      "convex-pulse": ["./index.ts"],
+      "convex-pulse/angular": ["./angular/index.ts"],
+      "convex-pulse/devtools": ["./devtools/index.ts"],
+      "convex-pulse/http": ["./http/index.ts"],
+      "convex-pulse/nextjs": ["./nextjs/index.ts"],
+      "convex-pulse/react": ["./react/index.ts"],
+      "convex-pulse/solid": ["./solid/index.ts"],
+      "convex-pulse/svelte": ["./svelte/index.ts"],
+      "convex-pulse/sveltekit": ["./sveltekit/index.ts"],
+      "convex-pulse/sveltekit/server": ["./sveltekit/server.ts"],
+      "convex-pulse/vue": ["./vue/index.ts"]
+    }
+  },
+  "include": [
+    "angular/**/*.ts",
+    "client/**/*.ts",
+    "devtools/**/*.ts",
+    "http/**/*.ts",
+    "nextjs/**/*.ts",
+    "node/**/*.ts",
+    "react/**/*.ts",
+    "solid/**/*.ts",
+    "svelte/**/*.ts",
+    "sveltekit/**/*.ts",
+    "vue/**/*.ts",
+    "testkit/**/*.ts",
+    "tests/node/**/*.ts",
+    "tests/angular/**/*.ts",
+    "tests/devtools/**/*.ts",
+    "tests/react/**/*.tsx",
+    "tests/solid/**/*.ts",
+    "tests/svelte/**/*.ts",
+    "tests/vue/**/*.ts",
+    "tests/sync/**/*.ts",
+    "index.ts",
+    "vitest.config.ts"
+  ],
+  "exclude": ["dist"]
+}

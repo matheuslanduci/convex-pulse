@@ -1,0 +1,17 @@
+.vscode
+.zed
+node_modules
+.context
+coverage
+dist
+.blume
+.blume-verify
+storybook-static
+
+# Framework build artifacts
+.next
+.svelte-kit
+.tanstack
+
+# Incremental TypeScript state
+*.tsbuildinfo

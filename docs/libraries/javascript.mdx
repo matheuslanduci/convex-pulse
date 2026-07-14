@@ -1,0 +1,255 @@
+---
+title: JavaScript and Node.js
+description: ConvexPulseClient queries, subscriptions, mutations, actions, authentication, and cleanup.
+---
+
+## Setup
+
+For a new Node.js TypeScript project, initialize the project and Convex:
+
+```bash
+mkdir my-app && cd my-app
+pnpm init
+pnpm add convex-pulse convex
+pnpm add --save-dev @types/node tsx typescript
+pnpm exec convex dev
+```
+
+Add the backend from [Before you start](/docs/usage#before-you-start). The first `convex dev` run generates `convex/_generated/api` and writes the deployment configuration to `.env.local` after you create or select a deployment.
+
+Import the framework-neutral client from the package root. Node does not load `.env.local` automatically, so load it in your process or provide `CONVEX_URL` through your deployment environment.
+
+```ts
+import { ConvexPulseClient } from 'convex-pulse'
+
+import { api } from '../convex/_generated/api.js'
+
+const convexUrl = process.env.CONVEX_URL
+if (convexUrl === undefined) throw new Error('Missing CONVEX_URL')
+
+const client = new ConvexPulseClient(convexUrl, { gcTime: 60_000 })
+
+try {
+  const tasks = await client.query(api.tasks.list, {
+    args: { listId: 'default' }
+  })
+  console.log(tasks)
+} finally {
+  await client.close()
+}
+```
+
+`gcTime` controls how long an unused query remains cached.
+
+Run this file while the Convex development process is active:
+
+```bash
+pnpm exec tsx --env-file=.env.local src/index.ts
+```
+
+## `query`
+
+`query(reference, options)` waits for the first successful live result, releases its subscription, and resolves the value.
+
+### Fetching data
+
+```ts
+const tasks = await client.query(api.tasks.list, {
+  args: { listId }
+})
+```
+
+### Selecting data
+
+Use `select` to transform the value before the promise resolves.
+
+```ts
+const titles = await client.query(api.tasks.list, {
+  args: { listId },
+  select: (tasks) => tasks.map((task) => task.title)
+})
+```
+
+### Retrying failures
+
+`retries` is the number of additional attempts after a failed query.
+
+```ts
+const tasks = await client.query(api.tasks.list, {
+  args: { listId },
+  retries: 2
+})
+```
+
+## `onUpdate`
+
+`onUpdate(reference, options, callback)` calls the callback for each successful query value.
+
+### Subscribing to data
+
+```ts
+const subscription = client.onUpdate(
+  api.tasks.list,
+  { args: { listId } },
+  (tasks) => console.log(tasks)
+)
+
+subscription.onError((error) => console.error(error))
+console.log(subscription.getCurrentValue())
+subscription.unsubscribe()
+```
+
+The return value is a callable subscription handle. Call it or its `unsubscribe()` method to release the subscription. `getCurrentValue()` returns the latest successful value, or `undefined` before the first value arrives, and throws if the current result is an error. Register error listeners with `onError(listener)`; it returns a function that removes that error listener.
+
+### Selecting subscription data
+
+`onUpdate` accepts the same `select` and `retries` options as `query`.
+
+```ts
+const subscription = client.onUpdate(
+  api.tasks.list,
+  {
+    args: { listId },
+    select: (tasks) => tasks.filter((task) => !task.done)
+  },
+  (openTasks) => console.log(openTasks)
+)
+```
+
+### Loading paginated data
+
+```ts
+const subscription = client.onUpdate(
+  api.tasks.listPaginated,
+  { args: { listId }, pagination: { initialNumItems: 20 } },
+  ({ canLoadMore, data, loadMore }) => {
+    console.log(data)
+    if (canLoadMore) loadMore(20)
+  }
+)
+```
+
+The generated backend reference includes `paginationOpts`, but omit that field from client `args`. Convex Pulse supplies it from `pagination.initialNumItems` and later `loadMore` calls. Paginated subscriptions do not support `select`.
+
+## `watchQuery`
+
+`watchQuery(reference, options)` exposes a live query as an async iterable.
+
+### Iterating over data
+
+```ts
+for await (const tasks of client.watchQuery(api.tasks.list, {
+  args: { listId }
+})) {
+  console.log(tasks)
+}
+```
+
+The iterable throws on a query error, ends when the client closes, and releases its subscription when the loop exits. Only one `next()` call may be pending. It also supports `select`, `retries`, and paginated options.
+
+For a paginated query, each yielded value has the same successful shape as the `onUpdate` pagination callback: `data`, `canLoadMore`, `isLoading`, `isLoadingMore`, and `loadMore(numItems)`. Convex Pulse yields after the current page finishes loading, so `isLoading` is `false` for emitted values.
+
+## `mutation`
+
+### Executing a mutation
+
+```ts
+const id = await client.mutation(api.tasks.create, {
+  args: { listId, title: 'Write JavaScript docs' },
+  retries: 1
+})
+```
+
+### Deduplicating concurrent mutations
+
+Return a stable Convex value from `dedupe`. Concurrent calls with the same value share one request.
+
+```ts
+await client.mutation(api.tasks.save, {
+  args: { id, title },
+  dedupe: ({ args }) => args.id
+})
+```
+
+### Updating query data optimistically
+
+```ts
+await client.mutation(api.tasks.create, {
+  args: { listId, title: 'Write JavaScript docs' },
+  optimistic: ({ data, optimisticId, store }) =>
+    store.get(api.tasks.list, { listId: data.listId }).append({
+      _id: optimisticId,
+      _creationTime: Date.now(),
+      done: false,
+      listId: data.listId,
+      title: data.title
+    })
+})
+```
+
+Optimistic changes reconcile on success and roll back on failure.
+
+## `action`
+
+The framework-neutral client calls actions through its typed `.action()` method.
+
+### Executing an action
+
+```ts
+const formatted = await client.action(api.tasks.format, {
+  args: { title: 'Write JavaScript docs' }
+})
+```
+
+### Deduplicating concurrent calls
+
+Return a stable Convex value from `dedupe`. Concurrent calls to the same action with the same value share one in-flight request.
+
+```ts
+function formatTask() {
+  return client.action(api.tasks.format, {
+    args: { title: 'Write JavaScript docs' },
+    dedupe: ({ args }) => args.title
+  })
+}
+
+const [first, second] = await Promise.all([formatTask(), formatTask()])
+```
+
+The key is released when the action settles. Deduplication is local to this client instance, so it prevents concurrent duplicate calls but is not durable idempotency and does not make retries safe.
+
+### Retrying failures
+
+Action retries are disabled by default (`retries: 0`). Put `retries` in the action options to request additional attempts, but only do this when the action is idempotent or implements its own idempotency key. Actions can perform external side effects, and a failed attempt may have completed those effects before reporting the failure; retrying can therefore repeat them.
+
+```ts
+const formatted = await client.action(api.tasks.format, {
+  args: { title: 'Write JavaScript docs' },
+  retries: 2 // Only safe when this action is idempotent.
+})
+```
+
+The promise resolves with the action result and rejects with the action error.
+
+## Lifecycle and prefetching
+
+The framework-neutral client reports query values through promises, callbacks, or async iterables, and mutation and action results through promises. It does not expose the reactive query states, mutation lifecycle properties, lifecycle callbacks, or prefetch handles provided by the React, Angular, Solid, Svelte, and Vue adapters. Use `onUpdate` or `watchQuery` when Node code needs a retained live subscription.
+
+## Authentication
+
+Pass `fetchToken` in the constructor options, or call `setAuth(fetchToken, options?)` when authentication is configured later. Call `clearAuth()` to return to the anonymous identity. See the [shared usage guide](/docs/usage#7-authenticate) for the token-fetcher contract.
+
+```ts
+const client = new ConvexPulseClient(CONVEX_URL, {
+  fetchToken: ({ forceRefreshToken }) =>
+    getToken({ skipCache: forceRefreshToken })
+})
+```
+
+## Cleanup
+
+Call `close()` when the process or application no longer needs the client. It rejects pending one-off queries, ends active streams, releases subscriptions, and is idempotent.
+
+## Exported types
+
+The root entrypoint exports `QueryOptions`, `QueryPaginationOptions`, `MutationOptions`, `ActionOptions`, `ActionDedupeContext`, `AuthOptions`, `AuthTokenFetcher`, `OptimisticMutationContext`, `OptimisticStore`, and `ConvexPulseClientOptions`.

@@ -1,0 +1,332 @@
+---
+title: Server rendering
+description: Preload Convex queries and hydrate live React or Svelte views in Next.js, TanStack Start, and SvelteKit.
+---
+
+Server rendering uses two clients:
+
+1. A short-lived `ConvexPulseHttpClient`, or the `convex-pulse/nextjs` helpers, fetches the initial result on the server.
+2. A framework client hydrates that result in the browser and subscribes to future changes.
+
+The serialized `PreloadedQuery` payload contains the function name, arguments, and initial value. Treat it as opaque application data: pass it between server and client code, then consume it with the matching framework primitive.
+
+## Next.js App Router
+
+Use `preloadQuery` from `convex-pulse/nextjs` in a Server Component and `usePreloadedQuery` in a Client Component:
+
+```tsx title="app/page.tsx"
+import { preloadQuery } from 'convex-pulse/nextjs'
+
+import { api } from '@/convex/_generated/api'
+import { Tasks } from './tasks'
+
+const preloadedTasks = await preloadQuery(api.tasks.list, {
+  args: { listId: 'default' }
+})
+
+return <Tasks preloadedTasks={preloadedTasks} />
+```
+
+```tsx title="app/tasks.tsx"
+'use client'
+
+import { usePreloadedQuery } from 'convex-pulse/react'
+import type { PreloadedQuery } from 'convex-pulse/react'
+
+import { api } from '@/convex/_generated/api'
+
+export function Tasks({ preloadedTasks }: TasksProps) {
+  const tasks = usePreloadedQuery(preloadedTasks)
+  return tasks.map((task) => <p key={task._id}>{task.title}</p>)
+}
+
+type TasksProps = Readonly<{
+  preloadedTasks: PreloadedQuery<typeof api.tasks.list>
+}>
+```
+
+The helper reads `NEXT_PUBLIC_CONVEX_URL` unless `url` is supplied. It uses `cache: 'no-store'`, so the result is fetched for the request instead of entering the Next.js fetch cache. The complete provider and browser-client setup is in the [Next.js reference](/docs/libraries/nextjs).
+
+## TanStack Start
+
+Create a current TanStack Start project with the TanStack CLI, then initialize Convex:
+
+```bash
+pnpm dlx @tanstack/cli create my-app -y
+cd my-app
+pnpm add convex-pulse convex
+pnpm exec convex dev
+```
+
+Add the backend from [Before you start](/docs/usage#before-you-start). Codegen creates `convex/_generated/api`. With the default Vite-based Start template, make sure `.env.local` contains the generated deployment URL as `VITE_CONVEX_URL`.
+
+Create one live browser client at module scope. On the server Convex Pulse uses a dormant transport; the browser build opens the live connection.
+
+```ts title="src/convex.ts"
+import { ConvexPulseReactClient } from 'convex-pulse/react'
+
+const convexUrl = import.meta.env.VITE_CONVEX_URL
+if (convexUrl === undefined) throw new Error('VITE_CONVEX_URL is not set')
+
+export const convex = new ConvexPulseReactClient(convexUrl)
+```
+
+Provide it from the generated root route's shell so it stays mounted across navigation:
+
+```tsx title="src/routes/__root.tsx"
+import {
+  HeadContent,
+  Outlet,
+  Scripts,
+  createRootRoute
+} from '@tanstack/react-router'
+import { ConvexPulseReactProvider } from 'convex-pulse/react'
+import type { ReactNode } from 'react'
+
+import { convex } from '../convex'
+
+export const Route = createRootRoute({
+  component: App,
+  shellComponent: RootDocument
+})
+
+function App() {
+  return <Outlet />
+}
+
+function RootDocument({ children }: RootDocumentProps) {
+  return (
+    <html lang="en">
+      <head>
+        <HeadContent />
+      </head>
+      <body>
+        <ConvexPulseReactProvider convex={convex}>
+          {children}
+        </ConvexPulseReactProvider>
+        <Scripts />
+      </body>
+    </html>
+  )
+}
+
+type RootDocumentProps = Readonly<{ children: ReactNode }>
+```
+
+Return a preloaded payload from a server function, load it through the route, and consume it with the live React client:
+
+```tsx title="src/routes/index.tsx"
+import { createFileRoute } from '@tanstack/react-router'
+import { createServerFn } from '@tanstack/react-start'
+import { ConvexPulseHttpClient } from 'convex-pulse/http'
+import { usePreloadedQuery } from 'convex-pulse/react'
+import type { PreloadedQuery } from 'convex-pulse/react'
+
+import { api } from '../../convex/_generated/api'
+
+const loadTasks = createServerFn({ method: 'GET' })
+  .validator(validateLoadTasksInput)
+  .handler(({ data }) => {
+    const convexUrl = process.env.VITE_CONVEX_URL
+    if (convexUrl === undefined) throw new Error('VITE_CONVEX_URL is not set')
+
+    const client = new ConvexPulseHttpClient(convexUrl)
+    return client.preloadQuery(api.tasks.list, {
+      args: { listId: data.listId }
+    })
+  })
+
+export const Route = createFileRoute('/')({
+  loader: () => loadTasks({ data: { listId: 'default' } }),
+  component: Home,
+  errorComponent: ({ error }) => <p role="alert">{error.message}</p>
+})
+
+function Home() {
+  return <TaskList preloadedTasks={Route.useLoaderData()} />
+}
+
+function TaskList({ preloadedTasks }: TaskListProps) {
+  const tasks = usePreloadedQuery(preloadedTasks)
+
+  return tasks.map((task) => <p key={task._id}>{task.title}</p>)
+}
+
+function validateLoadTasksInput(input: unknown) {
+  if (
+    typeof input !== 'object' ||
+    input === null ||
+    !('listId' in input) ||
+    typeof input.listId !== 'string'
+  ) {
+    throw new TypeError('Expected a listId string')
+  }
+
+  return { listId: input.listId }
+}
+
+type TaskListProps = Readonly<{
+  preloadedTasks: PreloadedQuery<typeof api.tasks.list>
+}>
+```
+
+Current TanStack server functions receive validated input as `{ data }`, so call this one as `loadTasks({ data: { listId } })`. Read `process.env` inside the handler rather than at module scope; edge runtimes may inject server environment variables per request.
+
+The `PreloadedQuery` returned by the server function is compatible with Start's loader serializer because Convex values are encoded inside JSON string fields. Treat it as opaque and keep the server and browser on the same `convex-pulse` version. The route `errorComponent` handles both loader/preload rejection and live-query errors thrown by `usePreloadedQuery`.
+
+### TanStack Start authentication and cleanup
+
+For an authenticated preload, resolve the token inside the server function from the incoming request and set it on that function's short-lived HTTP client. Keep this adapter server-only:
+
+```ts
+import { getRequest } from '@tanstack/react-start/server'
+
+import { getAuthToken } from '#/server/auth'
+
+// Inside the createServerFn handler:
+const token = await getAuthToken(getRequest())
+const client = new ConvexPulseHttpClient(convexUrl)
+if (token !== undefined) client.setAuth(token)
+```
+
+`getAuthToken` belongs to your auth integration and returns an OpenID Connect identity JWT or `undefined`. Do not return that token from the loader. Configure browser authentication separately by passing a stable `fetchToken` callback to the root `ConvexPulseReactProvider`, following the [React authentication section](/docs/libraries/react#authentication). A preloaded authenticated value does not authenticate the browser connection.
+
+Server functions create short-lived HTTP clients and need no cleanup. A normal Start application keeps the root browser client open across route navigation and performs no explicit cleanup; the browser releases the connection when the page goes away. Do not close it from a route component.
+
+## SvelteKit
+
+Create a SvelteKit project, keep Convex functions under `src/`, and initialize the deployment:
+
+```bash
+pnpm dlx sv create my-app --template minimal --types ts --no-add-ons --install pnpm
+cd my-app
+pnpm add convex-pulse convex
+```
+
+```json title="convex.json"
+{
+  "functions": "src/convex/"
+}
+```
+
+```bash
+pnpm exec convex dev
+```
+
+Add the schema and functions from [Before you start](/docs/usage#before-you-start) under `src/convex/`. Convex codegen then creates `src/convex/_generated/api`. SvelteKit exposes browser-readable environment variables with the `PUBLIC_` prefix, so make sure `.env.local` contains the generated deployment URL under this name:
+
+```dotenv title=".env.local"
+PUBLIC_CONVEX_URL=https://your-deployment.convex.cloud
+```
+
+If the CLI generated `VITE_CONVEX_URL`, copy its value to `PUBLIC_CONVEX_URL`; keep the generated `CONVEX_DEPLOYMENT` entry unchanged.
+
+Register the SvelteKit transport and initialize the singleton early. The same universal hook runs during SSR and in the browser, so its decoder can upgrade transported values to live subscriptions before route components render:
+
+```ts title="src/hooks.ts"
+import { PUBLIC_CONVEX_URL } from '$env/static/public'
+import {
+  decodeConvexLoad,
+  decodeConvexLoadPaginated,
+  encodeConvexLoad,
+  encodeConvexLoadPaginated,
+  initConvex
+} from 'convex-pulse/sveltekit'
+
+initConvex(PUBLIC_CONVEX_URL)
+
+export const transport = {
+  ConvexLoadResult: { encode: encodeConvexLoad, decode: decodeConvexLoad },
+  ConvexLoadPaginatedResult: {
+    encode: encodeConvexLoadPaginated,
+    decode: decodeConvexLoadPaginated
+  }
+}
+```
+
+Reuse that singleton and install Svelte context in the root layout:
+
+```svelte title="src/routes/+layout.svelte"
+<script lang="ts">
+  import { PUBLIC_CONVEX_URL } from '$env/static/public'
+  import { setupConvex } from 'convex-pulse/svelte'
+
+  let { children } = $props()
+  setupConvex(PUBLIC_CONVEX_URL)
+</script>
+
+{@render children()}
+```
+
+Use `convexLoad` in a universal load function. On the server it fetches over HTTP and participates in SvelteKit serialization; during client navigation it fetches directly through the singleton. `'skip'` performs no request.
+
+```ts title="src/routes/+page.ts"
+import { convexLoad, convexLoadPaginated } from 'convex-pulse/sveltekit'
+import { api } from '../convex/_generated/api'
+
+export async function load() {
+  return {
+    tasks: await convexLoad(api.tasks.list, { listId: 'default' }),
+    activity: await convexLoadPaginated(
+      api.activity.list,
+      { listId: 'default' },
+      { initialNumItems: 20 }
+    )
+  }
+}
+```
+
+The route receives the normal reactive Pulse result shape. The first HTML response already contains the server value; hydration replaces its transport marker with a live query, and paginated results gain a working `loadMore` function.
+
+```svelte title="src/routes/+page.svelte"
+<script lang="ts">
+  let { data } = $props()
+  const tasks = $derived(data.tasks)
+  const activity = $derived(data.activity)
+</script>
+
+{#each tasks.data ?? [] as task (task._id)}
+  <p>{task.title}</p>
+{/each}
+
+{#if activity.canLoadMore}
+  <button onclick={() => activity.loadMore(20)}>Load more</button>
+{/if}
+```
+
+Query failures reject the load and reach the nearest SvelteKit error boundary. `createConvexHttpClient()` is available for server-only one-off operations; it uses the URL registered by `initConvex`.
+
+### SvelteKit authentication
+
+Wrap `resolve` with `withServerConvexToken`. It uses `AsyncLocalStorage`, so overlapping requests cannot leak credentials and both `convexLoad` and `createConvexHttpClient` automatically use the current request's token:
+
+```ts title="src/hooks.server.ts"
+import type { Handle } from '@sveltejs/kit'
+import { withServerConvexToken } from 'convex-pulse/sveltekit/server'
+
+import { getAuthToken } from '$lib/server/auth'
+
+export const handle: Handle = async ({ event, resolve }) => {
+  const token = await getAuthToken(event.cookies)
+  return withServerConvexToken(token, () => resolve(event))
+}
+```
+
+`getAuthToken` is your server auth adapter and must return an OpenID Connect identity JWT or `undefined`. An explicit `{ token }` option on `convexLoad` or `createConvexHttpClient` remains available as an override. Configure browser authentication separately with `setupAuth`; the server token is never serialized to the page and does not authenticate the live WebSocket by itself.
+
+## Authenticate server and browser separately
+
+For an authenticated initial render, set a token string on `ConvexPulseHttpClient` before preloading, or pass `token` to a Next.js helper. Configure the browser client with a token fetcher:
+
+```ts
+const client = new ConvexPulseReactClient(CONVEX_URL, {
+  fetchToken: ({ forceRefreshToken }) =>
+    getToken({ skipCache: forceRefreshToken })
+})
+```
+
+The server token and browser token fetcher are separate integrations. A preloaded authenticated value does not authenticate the live browser connection by itself.
+
+## Understand consistency
+
+Each HTTP operation is stateless. Two preload calls can observe different database snapshots, unlike queries sharing one live WebSocket transition. If several values must be mutually consistent, return them from one Convex query and preload that query once.

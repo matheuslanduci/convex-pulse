@@ -1,0 +1,338 @@
+---
+title: Svelte
+description: Reactive Svelte queries, context, authentication, mutations, prefetching, and cleanup.
+---
+
+## Setup
+
+For a new plain Svelte application, scaffold with Vite and initialize Convex:
+
+```bash
+pnpm create vite my-app --template svelte-ts
+cd my-app
+pnpm add convex-pulse convex
+pnpm exec convex dev
+```
+
+Add the backend from [Before you start](/docs/usage#before-you-start). The first `convex dev` run generates `convex/_generated/api` and writes `VITE_CONVEX_URL` to `.env.local` after you create or select a deployment.
+
+Initialize one app-scoped client in the root component. `setupConvex` reuses an early client created by SvelteKit's SSR transport and places it in Svelte context.
+
+```svelte title="src/routes/+layout.svelte"
+<script lang="ts">
+  import { setupConvex } from 'convex-pulse/svelte'
+
+  let { children } = $props()
+  setupConvex(import.meta.env.VITE_CONVEX_URL)
+</script>
+
+{@render children()}
+```
+
+Use `useConvexClient()` in child components or `getConvexClient()` in non-component browser code. `closeConvex()` is intended for tests or an application host teardown, not route navigation.
+
+## Reactive queries
+
+`useQuery(reference, argsGetter, options?)` tracks every reactive value read by the argument getter. It replaces the subscription when those values change and releases it when the component is destroyed.
+
+```svelte
+<script lang="ts">
+  import { useQuery } from 'convex-pulse/svelte'
+  import { api } from '../convex/_generated/api'
+
+  let listId = $state<string | undefined>()
+  const tasks = useQuery(api.tasks.list, () =>
+    listId === undefined ? 'skip' : { listId }
+  )
+</script>
+
+{#if tasks.isLoading}
+  <p>Loading…</p>
+{:else if tasks.error}
+  <p>{tasks.error.message}</p>
+{:else}
+  {#each tasks.data ?? [] as task (task._id)}
+    <p>{task.title}</p>
+  {/each}
+{/if}
+```
+
+The literal `'skip'` is the shared real skip token and permits genuinely missing arguments without fabricating a fallback. Options include `initialData`, `keepPreviousData`, `onDataChange`, `retries`, `select`, and `throwOnError`. `usePaginatedQuery` provides the same reactive argument and skip behavior plus `initialNumItems`, `canLoadMore`, and `loadMore`.
+
+The `createQuery(client, reference, options)` APIs below remain available as lower-level readable stores for code that owns a client explicitly.
+
+### Complete client component
+
+```svelte title="src/App.svelte"
+<script lang="ts">
+  import {
+    useAction,
+    useMutation,
+    usePrefetchQuery,
+    useQuery
+  } from 'convex-pulse/svelte'
+  import { onDestroy } from 'svelte'
+
+  import { api } from '../convex/_generated/api'
+
+  const listId = 'default'
+  let title = $state('Svelte task')
+  const tasks = useQuery(api.tasks.list, () => ({ listId }), {
+    onDataChange: ({ next, previous }) => {
+      console.log('Tasks changed', { next, previous })
+    }
+  })
+  const createTask = useMutation(api.tasks.create)
+  const formatTask = useAction(api.tasks.format)
+  const prefetchTask = usePrefetchQuery(api.tasks.get)
+  let cancelPrefetch: (() => void) | undefined
+
+  onDestroy(() => {
+    cancelPrefetch?.()
+  })
+
+  function warmTask(id: Parameters<typeof prefetchTask>[0]['id']) {
+    cancelPrefetch?.()
+    const handle = prefetchTask({ id })
+    cancelPrefetch = handle.cancel
+    void handle.ready.catch(() => undefined)
+  }
+</script>
+
+<input aria-label="Task title" bind:value={title} />
+<button
+  disabled={$createTask.isPending}
+  onclick={() =>
+    void createTask({ listId, title }).catch(() => undefined)}
+>
+  Create task
+</button>
+<button
+  disabled={$formatTask.isPending}
+  onclick={() => void formatTask({ title }).catch(() => undefined)}
+>
+  Format title
+</button>
+
+{#if tasks.status === 'pending'}
+  <p>Loading…</p>
+{:else if tasks.status === 'error'}
+  <p>{tasks.error.message}</p>
+{:else}
+  {#each tasks.data as task (task._id)}
+    <button type="button" onmouseenter={() => warmTask(task._id)}>
+      {task.title}
+    </button>
+  {/each}
+{/if}
+```
+
+## `createQuery`
+
+`createQuery(client, reference, options)` returns a readable store. Its query subscription exists while the store has subscribers.
+
+### Fetching and selecting data
+
+```svelte
+<script lang="ts">
+  import { createQuery } from 'convex-pulse/svelte'
+  import { api } from '../convex/_generated/api'
+  import { convex } from './convex'
+
+  const openTasks = createQuery(convex, api.tasks.list, {
+    args: { listId },
+    select: (tasks) => tasks.filter((task) => !task.done)
+  })
+</script>
+```
+
+Arguments go under `args`. Pass current Convex values, not stores. Arguments are captured when `createQuery` runs; changing an argument store later does not replace the prepared query. Only `enabled` accepts a readable store. `select` derives the successful `data` value.
+
+### Handling query state
+
+```svelte
+{#if $openTasks.status === 'pending'}
+  <p>Loading…</p>
+{:else if $openTasks.status === 'error'}
+  <p>{$openTasks.error.message}</p>
+{:else if $openTasks.status === 'success'}
+  {#each $openTasks.data as task (task._id)}
+    <p>{task.title}</p>
+  {/each}
+{/if}
+```
+
+With no `enabled` option, the store type contains `pending`, `error`, or `success`; TypeScript correctly excludes the unreachable `disabled` branch. Passing a boolean or readable `enabled` option adds `disabled` to the result union.
+
+### Disabling and retrying
+
+`enabled` accepts a boolean or readable store. `retries` is the number of additional attempts.
+
+```ts
+const task = createQuery(convex, api.tasks.get, {
+  args: { id },
+  enabled: hasTaskId,
+  retries: 2
+})
+```
+
+### Observing data changes
+
+Pass `onDataChange` in the options or import and call the standalone helper. It returns an unsubscribe function that a component should release with `onDestroy`. Listeners receive `{ next, previous }` after the initial successful result changes.
+
+```svelte
+<script lang="ts">
+  import { onDataChange } from 'convex-pulse/svelte'
+  import { onDestroy } from 'svelte'
+
+  const stopObserving = onDataChange(tasks, listener)
+  onDestroy(stopObserving)
+</script>
+```
+
+### Loading paginated data
+
+```ts
+const tasks = createQuery(convex, api.tasks.listPaginated, {
+  args: { listId },
+  pagination: { initialNumItems: 20 }
+})
+```
+
+Successful pagination state exposes `canLoadMore`, `isLoading`, `isLoadingMore`, and `loadMore(numItems)`. Paginated queries do not support `select`.
+
+## `createMutation`
+
+### Executing and observing a mutation
+
+```ts
+const createTask = createMutation(convex, api.tasks.create, {
+  onSuccess: ({ data }) => console.log('Created', data),
+  retries: 1
+})
+
+await createTask({ listId, title: 'Svelte docs' })
+console.log(createTask.status, createTask.isPending)
+```
+
+The result is both callable and readable. Imperative code reads `createTask.status`, `createTask.data`, `createTask.error`, and `createTask.isPending`. In Svelte markup, use `$createTask.status` and the other `$createTask` properties so the component subscribes reactively. `reset()` and mutation lifecycle callbacks are available on the callable.
+
+### Deduplicating and updating optimistically
+
+```ts
+const createTask = createMutation(convex, api.tasks.create, {
+  dedupe: ({ args }) => args.title,
+  optimistic: ({ data, optimisticId, store }) =>
+    store.get(api.tasks.list, { listId: data.listId }).append({
+      _id: optimisticId,
+      _creationTime: Date.now(),
+      done: false,
+      listId: data.listId,
+      title: data.title
+    })
+})
+```
+
+## `createAction`
+
+`createAction(client, reference, options?)` returns a typed callable that is also a readable lifecycle-state store.
+
+### Executing and retrying an action
+
+```ts
+const formatTask = createAction(convex, api.tasks.format, {
+  retries: 2 // Only safe when this action is idempotent.
+})
+const formatted = await formatTask({ title: 'Svelte docs' })
+```
+
+Set `dedupe: ({ args }) => args.title` in the action options to share one in-flight request between concurrent calls with the same value. The key is released when the action settles. Deduplication is local to this client instance, so it is not durable idempotency and does not make retries safe.
+
+Action retries are disabled by default (`retries: 0`). Only set `retries` above zero when the action is idempotent or implements its own idempotency key. Actions can perform external side effects, and a failed attempt may have completed those effects before reporting the failure; retrying can therefore repeat them.
+
+Imperative code reads `formatTask.status`, `formatTask.data`, `formatTask.error`, and `formatTask.isPending`, and can call `formatTask.reset()`. Use `$formatTask.status` and the other `$formatTask` properties in Svelte markup for reactive updates.
+
+## `createPrefetchQuery`
+
+`createPrefetchQuery(client, reference)` returns a typed prefetch function. Each call returns `{ ready, cancel }`; canceling an unfinished prefetch rejects `ready` with an `AbortError`.
+
+```svelte
+<script lang="ts">
+  import type { Id } from '../convex/_generated/dataModel'
+
+  const prefetchTask = createPrefetchQuery(convex, api.tasks.get)
+  let cancelPrefetch: (() => void) | undefined
+
+  onDestroy(() => cancelPrefetch?.())
+
+  function warmTask(id: Id<'task'>) {
+    cancelPrefetch?.()
+    const handle = prefetchTask({ id })
+    cancelPrefetch = handle.cancel
+    void handle.ready.catch(() => undefined)
+  }
+</script>
+```
+
+## `createPreloadedQuery`
+
+`createPreloadedQuery(client, payload)` returns a readable store for a query fetched during server rendering. It starts in `success` with the embedded server result and publishes live values or errors after subscribing.
+
+A plain Vite Svelte application has no server load phase, so it normally uses `createQuery`. Use `createPreloadedQuery` with SvelteKit or another server framework that can produce and serialize the payload.
+
+```svelte
+<script lang="ts">
+  import { PUBLIC_CONVEX_URL } from '$env/static/public'
+  import {
+    ConvexPulseSvelteClient,
+    createPreloadedQuery
+  } from 'convex-pulse/svelte'
+  import type { PageProps } from './$types'
+
+  let { data }: PageProps = $props()
+  const client = new ConvexPulseSvelteClient(PUBLIC_CONVEX_URL)
+  const tasks = $derived(createPreloadedQuery(client, data.preloadedTasks))
+
+  $effect(() => () => void client.close())
+</script>
+
+{#if $tasks.status === 'error'}
+  <p>{$tasks.error.message}</p>
+{:else}
+  {#each $tasks.data as task (task._id)}
+    <p>{task.title}</p>
+  {/each}
+{/if}
+```
+
+Create the payload on the server with `ConvexPulseHttpClient.preloadQuery()`. See the [complete SvelteKit setup](/docs/guides/server-rendering#sveltekit), including imports, environment configuration, request-scoped authentication, serialization, and page-scoped cleanup.
+
+## Authentication
+
+First configure your provider's JWT issuer and audience in `convex/auth.config.ts` by following the official [Convex authentication guides](https://docs.convex.dev/auth). Convex Pulse does not create sessions or tokens; it sends the identity JWT returned by your auth SDK to Convex.
+
+Call `setupAuth` beside `setupConvex` in the root layout. Its getter is reactive: sign-in, sign-out, loading, and token refresh changes automatically call `setAuth` or `clearAuth` on the app-scoped client.
+
+```svelte
+<script lang="ts">
+  import { setupAuth, setupConvex } from 'convex-pulse/svelte'
+
+  setupConvex(import.meta.env.VITE_CONVEX_URL)
+  setupAuth(() => ({
+    isLoading: session.isLoading,
+    isAuthenticated: session.user !== null,
+    fetchAccessToken: ({ forceRefreshToken }) =>
+      getToken({ skipCache: forceRefreshToken })
+  }))
+</script>
+```
+
+Child components call `useAuth()` to read reactive `isLoading`, `isAuthenticated`, and `isRefreshing` state, and can return `'skip'` from query argument getters until authentication is ready. For SSR, pass `initialState` to seed the server render. Low-level `client.setAuth` and `client.clearAuth` remain available for custom integrations. For SvelteKit server-side authentication, use the request-scoped helper shown in the [SvelteKit rendering guide](/docs/guides/server-rendering#sveltekit).
+
+## Cleanup
+
+Svelte automatically unsubscribes from stores referenced with `$store` when the component is destroyed. Release standalone `onDataChange` listeners and component-owned prefetches with `onDestroy`. A client may be page-scoped or app-scoped: close a page-scoped client when that page is destroyed, but keep an app-scoped shared client open across navigation and close it only with the application host. Closing cannot be reversed.
+
+## Direct client methods
+
+`ConvexPulseSvelteClient` also exposes `setAuth`, `clearAuth`, `action`, `prepareQuery`, `mutation`, `prefetch`, `devtools`, and `close`.

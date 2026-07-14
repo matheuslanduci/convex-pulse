@@ -1,0 +1,6 @@
+.convex
+.env.local
+.env.benchmark.cloud
+.env.benchmark.local
+results
+test-results

@@ -1,0 +1,7 @@
+
+.env.local
+.convex
+.env.e2e.cloud
+.env.e2e.local
+.env.e2e.remote-docker
+test-results

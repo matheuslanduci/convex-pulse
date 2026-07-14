@@ -1,0 +1,292 @@
+---
+title: Solid
+description: Solid query accessors, mutations, actions, and prefetching.
+---
+
+## Setup
+
+For a new Solid project, scaffold with Vite and initialize Convex:
+
+```bash
+pnpm create vite my-app --template solid-ts
+cd my-app
+pnpm add convex-pulse convex
+pnpm exec convex dev
+```
+
+Add the backend from [Before you start](/docs/usage#before-you-start). The first `convex dev` run generates `convex/_generated/api` and writes `VITE_CONVEX_URL` to `.env.local` after you create or select a deployment.
+
+Create one client and pass it to Solid primitives.
+
+```ts
+import { ConvexPulseSolidClient } from 'convex-pulse/solid'
+
+export const convex = new ConvexPulseSolidClient(
+  import.meta.env.VITE_CONVEX_URL
+)
+```
+
+Render the application normally:
+
+```tsx title="src/index.tsx"
+import { render } from 'solid-js/web'
+
+import { App } from './App'
+
+const root = document.getElementById('root')
+if (root === null) throw new Error('Missing #root element')
+
+render(() => <App />, root)
+```
+
+### Complete client component
+
+```tsx title="src/App.tsx"
+import { For, Match, Switch, createSignal, onCleanup } from 'solid-js'
+import {
+  createAction,
+  createMutation,
+  createPrefetchQuery,
+  createQuery
+} from 'convex-pulse/solid'
+
+import { api } from '../convex/_generated/api'
+import { convex } from './convex'
+
+const listId = 'default'
+
+export function App() {
+  const [title, setTitle] = createSignal('Solid task')
+  const tasks = createQuery(convex, api.tasks.list, {
+    args: { listId }
+  })
+  const createTask = createMutation(convex, api.tasks.create)
+  const formatTask = createAction(convex, api.tasks.format)
+  const prefetchTask = createPrefetchQuery(convex, api.tasks.get)
+  let cancelPrefetch: (() => void) | undefined
+
+  onCleanup(() => cancelPrefetch?.())
+
+  function warmTask(id: Parameters<typeof prefetchTask>[0]['id']) {
+    cancelPrefetch?.()
+    const handle = prefetchTask({ id })
+    cancelPrefetch = handle.cancel
+    void handle.ready.catch(() => undefined)
+  }
+
+  return (
+    <main>
+      <input
+        aria-label="Task title"
+        onInput={(event) => setTitle(event.currentTarget.value)}
+        value={title()}
+      />
+      <button
+        disabled={createTask.isPending}
+        onClick={() =>
+          void createTask({ listId, title: title() }).catch(() => undefined)
+        }
+        type="button"
+      >
+        Create task
+      </button>
+      <button
+        disabled={formatTask.isPending}
+        onClick={() =>
+          void formatTask({ title: title() }).catch(() => undefined)
+        }
+        type="button"
+      >
+        Format title
+      </button>
+      <Switch>
+        <Match when={tasks().status === 'pending'}>Loading…</Match>
+        <Match when={tasks().status === 'error'}>Could not load tasks</Match>
+        <Match when={tasks().status === 'disabled'}>Disabled</Match>
+        <Match when={tasks().status === 'success'}>
+          <For each={tasks().data ?? []}>
+            {(task) => (
+              <button type="button" onMouseEnter={() => warmTask(task._id)}>
+                {task.title}
+              </button>
+            )}
+          </For>
+        </Match>
+      </Switch>
+    </main>
+  )
+}
+```
+
+## `createQuery`
+
+`createQuery(client, reference, options)` returns a reactive accessor and releases its subscription with Solid cleanup.
+
+### Fetching and selecting data
+
+```tsx
+const openTasks = createQuery(convex, api.tasks.list, {
+  args: { listId },
+  select: (tasks) => tasks.filter((task) => !task.done)
+})
+```
+
+Arguments go under `args` as either a value or an accessor. When an accessor's arguments change, Pulse releases the previous subscription and prepares the new query. Return `skipToken` from the accessor to unsubscribe without inventing placeholder arguments. `select` derives the successful `data` value.
+
+```tsx
+import { skipToken } from 'convex-pulse/solid'
+
+const task = createQuery(convex, api.tasks.get, {
+  args: () => (taskId() === undefined ? skipToken : { id: taskId() })
+})
+```
+
+### Handling query state
+
+```tsx
+<Switch>
+  <Match when={openTasks().status === 'pending'}>Loading…</Match>
+  <Match when={openTasks().status === 'error'}>Could not load tasks</Match>
+  <Match when={openTasks().status === 'success'}>
+    {openTasks().data?.map((task) => (
+      <p>{task.title}</p>
+    ))}
+  </Match>
+</Switch>
+```
+
+The accessor contains `pending`, `error`, `success`, or `disabled` state. Set `throwOnError: true` to throw query failures while reading the accessor so Solid error boundaries can handle them. With this option, the returned type does not include the error-state branch.
+
+### Disabling and retrying
+
+`enabled` accepts a boolean or accessor. `retries` is the number of additional attempts.
+
+```tsx
+const task = createQuery(convex, api.tasks.get, {
+  args: { id: taskId },
+  enabled: isTaskVisible,
+  retries: 2
+})
+```
+
+### Observing data changes
+
+Pass `onDataChange` in the options or call `createOnDataChange(query, listener)`. It receives `{ next, previous }` after the initial successful result changes.
+
+### Loading paginated data
+
+```tsx
+const tasks = createQuery(convex, api.tasks.listPaginated, {
+  args: { listId },
+  pagination: { initialNumItems: 20 }
+})
+```
+
+Successful pagination state exposes `canLoadMore`, `isLoading`, `isLoadingMore`, and `loadMore(numItems)`. Paginated queries do not support `select`.
+
+## `createMutation`
+
+### Executing and observing a mutation
+
+```tsx
+const createTask = createMutation(convex, api.tasks.create, {
+  onSuccess: ({ data }) => console.log('Created', data),
+  retries: 1
+})
+
+await createTask({ listId, title: 'Solid docs' })
+console.log(createTask.status, createTask.isPending)
+```
+
+The callable exposes reactive `status`, `data`, `error`, and `isPending` properties plus `reset()` and all mutation lifecycle callbacks. Read `createTask.status`, not `createTask.status()`.
+
+### Deduplicating and updating optimistically
+
+```tsx
+const createTask = createMutation(convex, api.tasks.create, {
+  dedupe: ({ args }) => args.title,
+  optimistic: ({ data, optimisticId, store }) =>
+    store.get(api.tasks.list, { listId: data.listId }).append({
+      _id: optimisticId,
+      _creationTime: Date.now(),
+      done: false,
+      listId: data.listId,
+      title: data.title
+    })
+})
+```
+
+## `createAction`
+
+`createAction(client, reference, options?)` returns a typed callable with reactive lifecycle state.
+
+### Executing and retrying an action
+
+```tsx
+const formatTask = createAction(convex, api.tasks.format, {
+  retries: 2 // Only safe when this action is idempotent.
+})
+const formatted = await formatTask({ title: 'Solid docs' })
+```
+
+Set `dedupe: ({ args }) => args.title` in the action options to share one in-flight request between concurrent calls with the same value. The key is released when the action settles. Deduplication is local to this client instance, so it is not durable idempotency and does not make retries safe.
+
+Action retries are disabled by default (`retries: 0`). Only set `retries` above zero when the action is idempotent or implements its own idempotency key. Actions can perform external side effects, and a failed attempt may have completed those effects before reporting the failure; retrying can therefore repeat them.
+
+Read the reactive properties `formatTask.status`, `formatTask.data`, `formatTask.error`, and `formatTask.isPending`, or call `formatTask.reset()`.
+
+## `createPrefetchQuery`
+
+`createPrefetchQuery(client, reference)` returns a typed prefetch function. Each call returns `{ ready, cancel }`; canceling an unfinished prefetch rejects `ready` with an `AbortError`.
+
+```tsx
+import type { Id } from '../convex/_generated/dataModel'
+
+const prefetchTask = createPrefetchQuery(convex, api.tasks.get)
+let cancelPrefetch: (() => void) | undefined
+
+onCleanup(() => cancelPrefetch?.())
+
+function warmTask(id: Id<'task'>) {
+  cancelPrefetch?.()
+  const handle = prefetchTask({ id })
+  cancelPrefetch = handle.cancel
+  void handle.ready.catch(() => undefined)
+}
+```
+
+## Authentication
+
+First configure your provider's JWT issuer and audience in `convex/auth.config.ts` by following the official [Convex authentication guides](https://docs.convex.dev/auth). Convex Pulse does not create sessions or tokens; it sends the identity JWT returned by your auth SDK to Convex.
+
+After the auth SDK reports that the user is signed in, configure the client with a programmatic token fetcher. Pass `forceRefreshToken` through as the SDK's cache-bypass option:
+
+```ts
+convex.setAuth(({ forceRefreshToken }) =>
+  getToken({ skipCache: forceRefreshToken })
+)
+```
+
+Call `convex.clearAuth()` when the user signs out. This returns the client to the anonymous identity and clears identity-scoped cached and optimistic state. Do not leave a fetcher installed if it can no longer return a token.
+
+If the application only creates the client after the auth SDK has a signed-in session, pass the same fetcher as the constructor's `fetchToken` option instead. In Solid, use an app-root effect to follow the auth SDK's signed-in state and switch between `setAuth` and `clearAuth`; keep the shared client outside the component tree so it survives reactive reruns.
+
+```ts
+const authenticatedConvex = new ConvexPulseSolidClient(
+  import.meta.env.VITE_CONVEX_URL,
+  {
+    fetchToken: ({ forceRefreshToken }) =>
+      getToken({ skipCache: forceRefreshToken })
+  }
+)
+```
+
+`setAuth` also accepts `onChange`, `onError`, and `onRefreshChange` callbacks. See the [shared authentication contract](/docs/usage#7-authenticate) for their signatures.
+
+## Cleanup
+
+Solid query primitives and component-owned prefetches use `onCleanup`. The shared client normally lives for the page lifetime; do not close it from an ordinary component. If an embedding host explicitly disposes the complete Solid root, call `await convex.close()` after disposing that root. Closing cannot be reversed.
+
+## Direct client methods
+
+`ConvexPulseSolidClient` also exposes `setAuth`, `clearAuth`, `action`, `prepareQuery`, `mutation`, `prefetch`, `devtools`, and `close`.

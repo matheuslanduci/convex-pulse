@@ -1,0 +1,290 @@
+---
+title: Angular
+description: Angular provider, query and mutation signals, actions, and prefetching.
+---
+
+## Setup
+
+Convex Pulse supports Angular 20 and newer. For a new project, choose an Angular CLI version compatible with your installed Node.js version:
+
+```bash
+pnpm dlx @angular/cli@20 new my-app --package-manager pnpm
+cd my-app
+pnpm add convex-pulse convex
+pnpm exec convex dev
+```
+
+Add the backend from [Before you start](/docs/usage#before-you-start). A standard Angular component under `src/app` imports the generated API from `../../convex/_generated/api`.
+
+### Make the deployment URL available
+
+`convex dev` writes `CONVEX_URL` to `.env.local`, but Angular CLI does not expose that file to browser code automatically. Declare a build-time constant:
+
+```ts title="src/env.d.ts"
+declare const CONVEX_URL: string
+```
+
+Pass the public deployment URL with Angular's `--define` option when serving or building:
+
+```bash
+pnpm exec ng serve --define "CONVEX_URL='https://your-deployment.convex.cloud'"
+```
+
+The deployment URL is public configuration, not a secret. For repeatable scripts, read `CONVEX_URL` from `.env.local` in a small Node wrapper and forward the same `--define` option to `ng serve` or `ng build`.
+
+### Provide the client
+
+Create one client and provide it through `CONVEX_PULSE_CLIENT`.
+
+```ts title="src/app/app.config.ts"
+import type { ApplicationConfig } from '@angular/core'
+import {
+  CONVEX_PULSE_CLIENT,
+  ConvexPulseAngularClient
+} from 'convex-pulse/angular'
+
+export const convex = new ConvexPulseAngularClient(CONVEX_URL)
+
+export const appConfig: ApplicationConfig = {
+  providers: [{ provide: CONVEX_PULSE_CLIENT, useValue: convex }]
+}
+```
+
+If the Angular application host is explicitly destroyed, close the client with `applicationRef.onDestroy(() => void convex.close())`. Do not close the shared client from an ordinary component because closing is permanent.
+
+### Complete standalone component
+
+This component is directly usable with the documented backend:
+
+```ts title="src/app/app.ts"
+import { Component, DestroyRef, inject, signal } from '@angular/core'
+import {
+  injectAction,
+  injectMutation,
+  injectPrefetchQuery,
+  injectQuery
+} from 'convex-pulse/angular'
+
+import { api } from '../../convex/_generated/api'
+import type { Id } from '../../convex/_generated/dataModel'
+
+@Component({
+  selector: 'app-root',
+  template: `
+    <button type="button" (click)="enabled.update((value) => !value)">
+      Toggle query
+    </button>
+    @let result = tasks();
+    @switch (result.status) {
+      @case ('pending') {
+        <p>Loading…</p>
+      }
+      @case ('error') {
+        <p>{{ result.error.message }}</p>
+      }
+      @case ('disabled') {
+        <p>Disabled</p>
+      }
+      @case ('success') {
+        @for (task of result.data; track task._id) {
+          <button type="button" (mouseenter)="warmTask(task._id)">
+            {{ task.title }}
+          </button>
+        }
+      }
+    }
+    <button type="button" (click)="create()" [disabled]="createTask.isPending">
+      Create task
+    </button>
+    <button type="button" (click)="format()" [disabled]="formatTask.isPending">
+      Format title
+    </button>
+  `
+})
+export class App {
+  readonly #destroyRef = inject(DestroyRef)
+  readonly #listId = 'default'
+  readonly #prefetchTask = injectPrefetchQuery(api.tasks.get)
+  #cancelPrefetch: (() => void) | undefined
+
+  protected readonly enabled = signal(true)
+  protected readonly tasks = injectQuery(api.tasks.list, {
+    args: { listId: this.#listId },
+    enabled: this.enabled
+  })
+  protected readonly createTask = injectMutation(api.tasks.create)
+  protected readonly formatTask = injectAction(api.tasks.format)
+
+  constructor() {
+    this.#destroyRef.onDestroy(() => this.#cancelPrefetch?.())
+  }
+
+  protected create() {
+    void this.createTask({
+      listId: this.#listId,
+      title: 'Angular task'
+    }).catch(() => undefined)
+  }
+
+  protected format() {
+    void this.formatTask({ title: 'Angular task' }).catch(() => undefined)
+  }
+
+  protected warmTask(id: Id<'task'>) {
+    this.#cancelPrefetch?.()
+    const handle = this.#prefetchTask({ id })
+    this.#cancelPrefetch = handle.cancel
+    void handle.ready.catch(() => undefined)
+  }
+}
+```
+
+## `injectQuery`
+
+`injectQuery(reference, options)` returns a readonly Angular signal and releases its live subscription through `DestroyRef`.
+
+### Fetching and selecting data
+
+```ts
+protected readonly openTasks = injectQuery(api.tasks.list, {
+  args: { listId: this.listId() },
+  select: (tasks) => tasks.filter((task) => !task.done)
+})
+```
+
+Arguments go under `args` as a value, signal, or getter. When their value changes, Pulse releases the previous subscription and prepares the new query. Return `skipToken` to unsubscribe without inventing placeholder arguments. `select` derives the value stored in successful query state.
+
+```ts
+import { injectQuery, skipToken } from 'convex-pulse/angular'
+
+protected readonly task = injectQuery(api.tasks.get, {
+  args: () =>
+    this.taskId() === undefined ? skipToken : { id: this.taskId() }
+})
+```
+
+### Handling query state
+
+Call the signal and narrow its `pending`, `error`, `success`, or `disabled` status before reading `data` or `error`.
+
+```ts
+const result = this.openTasks()
+if (result.status === 'success') console.log(result.data)
+```
+
+Set `throwOnError: true` to throw query failures while reading the signal so an Angular `ErrorHandler` can handle them. With this option, the returned type does not include the error-state branch.
+
+### Disabling and retrying
+
+`enabled` accepts a boolean or `Signal<boolean>`. `retries` is the number of additional attempts.
+
+```ts
+protected readonly task = injectQuery(api.tasks.get, {
+  args: { id: this.taskId() },
+  enabled: this.shouldLoadTask,
+  retries: 2
+})
+```
+
+### Observing data changes
+
+Pass `onDataChange` in the options or call `injectOnDataChange(query, listener)`. The listener receives `{ next, previous }` after the initial successful result changes.
+
+### Loading paginated data
+
+```ts
+protected readonly tasks = injectQuery(api.tasks.listPaginated, {
+  args: { listId: this.listId() },
+  pagination: { initialNumItems: 20 }
+})
+```
+
+Successful pagination state exposes `canLoadMore`, `isLoadingMore`, and `loadMore(numItems)`. Paginated queries do not support `select`.
+
+## `injectMutation`
+
+`injectMutation(reference, options?)` returns a typed callable with observable lifecycle properties.
+
+### Executing and observing a mutation
+
+```ts
+readonly #createTask = injectMutation(api.tasks.create, {
+  onSuccess: ({ data }) => console.log('Created', data),
+  retries: 1
+})
+
+await this.#createTask({ listId: this.listId(), title: 'Angular docs' })
+console.log(this.#createTask.status, this.#createTask.isPending)
+```
+
+It exposes `status`, `data`, `error`, `isPending`, and `reset()`, plus `onMutate`, `onSuccess`, `onError`, and `onSettled` callbacks. These are plain callable properties backed by Angular signals: read `createTask.status`, not `createTask.status()`.
+
+### Deduplicating and updating optimistically
+
+```ts
+readonly #createTask = injectMutation(api.tasks.create, {
+  dedupe: ({ args }) => args.title,
+  optimistic: ({ data, optimisticId, store }) =>
+    store.get(api.tasks.list, { listId: data.listId }).append({
+      _id: optimisticId,
+      _creationTime: Date.now(),
+      done: false,
+      listId: data.listId,
+      title: data.title
+    })
+})
+```
+
+## `injectAction`
+
+`injectAction(reference, options?)` returns a typed callable with signal-backed lifecycle state.
+
+### Executing and retrying an action
+
+```ts
+readonly formatTask = injectAction(api.tasks.format, {
+  onSuccess: ({ data }) => console.log(data),
+  retries: 2 // Only safe when this action is idempotent.
+})
+
+const formatted = await this.formatTask({ title: 'Angular docs' })
+```
+
+Set `dedupe: ({ args }) => args.title` in the action options to share one in-flight request between concurrent calls with the same value. The key is released when the action settles. Deduplication is local to this client instance, so it is not durable idempotency and does not make retries safe.
+
+Action retries are disabled by default (`retries: 0`). Only set `retries` above zero when the action is idempotent or implements its own idempotency key. Actions can perform external side effects, and a failed attempt may have completed those effects before reporting the failure; retrying can therefore repeat them.
+
+Read `formatTask.status`, `formatTask.data`, `formatTask.error`, and `formatTask.isPending`, or call `formatTask.reset()`. Like mutation state, these are plain properties backed internally by Angular signals.
+
+## `injectPrefetchQuery`
+
+`injectPrefetchQuery(reference)` returns a typed prefetch function. Each call returns `{ ready, cancel }`; canceling an unfinished prefetch rejects `ready` with an `AbortError`. If a component owns the prefetch, register `handle.cancel` with its `DestroyRef` as shown in the complete component.
+
+## Authentication
+
+First configure your provider's JWT issuer and audience in `convex/auth.config.ts` by following the official [Convex authentication guides](https://docs.convex.dev/auth). Convex Pulse does not create sessions or tokens; it sends the identity JWT returned by your auth SDK or application service to Convex.
+
+After the auth service reports that the user is signed in, configure the client with a programmatic token fetcher. Pass `forceRefreshToken` through as the SDK's cache-bypass option:
+
+```ts
+convex.setAuth(({ forceRefreshToken }) =>
+  getToken({ skipCache: forceRefreshToken })
+)
+```
+
+Call `convex.clearAuth()` when the user signs out. This returns the client to the anonymous identity and clears identity-scoped cached and optimistic state. Do not leave a fetcher installed if it can no longer return a token.
+
+If the application only creates the client after the auth service has a signed-in session, pass the same fetcher as the constructor's `fetchToken` option instead. In Angular, connect the auth service to the exported application-scoped `convex` client during bootstrap or in a root service. Keep that integration at the application boundary rather than configuring authentication from individual components.
+
+```ts
+const authenticatedConvex = new ConvexPulseAngularClient(CONVEX_URL, {
+  fetchToken: ({ forceRefreshToken }) =>
+    getToken({ skipCache: forceRefreshToken })
+})
+```
+
+`setAuth` also accepts `onChange`, `onError`, and `onRefreshChange` callbacks. See the [shared authentication contract](/docs/usage#7-authenticate) for their signatures.
+
+## Direct client methods
+
+`ConvexPulseAngularClient` also exposes `setAuth`, `clearAuth`, `action`, `prepareQuery`, `mutation`, `prefetch`, `devtools`, and `close`.

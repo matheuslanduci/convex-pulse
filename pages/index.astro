@@ -1,0 +1,183 @@
+---
+import PageLayout from 'blume/components/layout/PageLayout.astro'
+import data from 'blume:data'
+
+const { config } = data
+---
+
+<PageLayout
+  analytics={config.analytics}
+  appleIcon={config.appleIcon}
+  banner={config.banner}
+  favicon={config.favicon}
+  fontCssVars={data.fontCssVars}
+  logo={config.logo}
+  navigation={data.navigation}
+  ogEnabled={config.og.enabled}
+  page={{
+    description: config.description,
+    route: '/',
+    title: 'Convex Pulse — Reactive Convex clients for every TypeScript app'
+  }}
+  searchEnabled={config.search.enabled}
+  site={{ title: config.title, description: config.description }}
+  siteUrl={config.site}
+  themeMode={config.theme.mode}
+>
+  <section class="relative overflow-hidden border-border border-b">
+    <div
+      aria-hidden="true"
+      class="pointer-events-none absolute inset-0 opacity-60 [background-image:radial-gradient(circle_at_20%_20%,color-mix(in_oklab,var(--color-accent)_22%,transparent),transparent_32%),radial-gradient(circle_at_80%_35%,color-mix(in_oklab,var(--color-primary)_14%,transparent),transparent_30%)]"
+    >
+    </div>
+
+    <div class="relative mx-auto max-w-6xl px-6 py-24 sm:py-32 lg:py-40">
+      <div class="max-w-4xl">
+        <div
+          class="mb-7 inline-flex items-center gap-2 rounded-full border border-border bg-background/80 px-3 py-1 font-medium text-muted-foreground text-sm shadow-sm backdrop-blur"
+        >
+          <span class="size-2 rounded-full bg-primary"></span>
+          Live data, explicit state
+        </div>
+
+        <h1
+          class="max-w-4xl text-balance font-semibold text-5xl tracking-[-0.045em] sm:text-6xl lg:text-7xl"
+        >
+          Convex clients that keep your app in motion.
+        </h1>
+        <p
+          class="mt-7 max-w-2xl text-pretty text-lg text-muted-foreground leading-8 sm:text-xl"
+        >
+          Typed queries, resilient mutations, prefetching, optimistic updates,
+          and first-class reactive bindings for modern TypeScript applications.
+        </p>
+
+        <div class="mt-10 flex flex-wrap gap-3">
+          <a
+            class="inline-flex items-center justify-center rounded-full bg-primary px-5 py-2.5 font-medium text-primary-foreground shadow-sm transition-transform hover:-translate-y-0.5"
+            href="/docs"
+          >
+            Read the docs
+            <span aria-hidden="true" class="ms-2">→</span>
+          </a>
+          <button
+            class="inline-flex items-center justify-center rounded-full border border-border bg-background px-5 py-2.5 font-medium transition-colors hover:bg-muted"
+            data-copy-agent
+            type="button"
+          >
+            Copy to your agent
+          </button>
+        </div>
+        <p
+          aria-live="polite"
+          class="mt-3 min-h-5 text-muted-foreground text-sm"
+          data-copy-agent-status
+        >
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="mx-auto max-w-6xl px-6 py-20 sm:py-24">
+    <div class="grid gap-5 md:grid-cols-3">
+      <article class="rounded-2xl border border-border bg-card p-6 shadow-sm">
+        <p class="font-mono text-primary text-sm">01 / REACTIVE</p>
+        <h2 class="mt-4 font-semibold text-xl tracking-tight">
+          State you can reason about
+        </h2>
+        <p class="mt-3 text-muted-foreground leading-7">
+          Pending, success, error, and disabled states stay explicit while live
+          query results update automatically.
+        </p>
+      </article>
+
+      <article class="rounded-2xl border border-border bg-card p-6 shadow-sm">
+        <p class="font-mono text-primary text-sm">02 / RESILIENT</p>
+        <h2 class="mt-4 font-semibold text-xl tracking-tight">
+          Mutations built for real apps
+        </h2>
+        <p class="mt-3 text-muted-foreground leading-7">
+          Add retries, deduplication, lifecycle callbacks, and optimistic updates
+          without giving up generated Convex types.
+        </p>
+      </article>
+
+      <article class="rounded-2xl border border-border bg-card p-6 shadow-sm">
+        <p class="font-mono text-primary text-sm">03 / PORTABLE</p>
+        <h2 class="mt-4 font-semibold text-xl tracking-tight">
+          One model, every framework
+        </h2>
+        <p class="mt-3 text-muted-foreground leading-7">
+          Use the same client behavior in JavaScript, React, Angular, Solid,
+          Svelte, Vue, Next.js, and server runtimes.
+        </p>
+      </article>
+    </div>
+
+    <div
+      class="mt-16 flex flex-col gap-6 rounded-2xl border border-border bg-muted/40 p-6 sm:p-8 lg:flex-row lg:items-center lg:justify-between"
+    >
+      <div>
+        <p class="font-semibold text-xl tracking-tight">Choose your client</p>
+        <p class="mt-1 text-muted-foreground">
+          Start with your framework and keep your Convex API types end to end.
+        </p>
+      </div>
+      <div class="flex flex-wrap gap-2 font-mono text-sm">
+        {
+          ['JavaScript', 'Next.js', 'React', 'Angular', 'Solid', 'Svelte', 'Vue'].map(
+            (client) => (
+              <span class="rounded-full border border-border bg-background px-3 py-1.5">
+                {client}
+              </span>
+            )
+          )
+        }
+      </div>
+    </div>
+  </section>
+
+  <footer class="border-border border-t">
+    <div
+      class="mx-auto flex max-w-6xl flex-col gap-3 px-6 py-8 text-muted-foreground text-sm sm:flex-row sm:items-center sm:justify-between"
+    >
+      <p>Convex Pulse</p>
+      <div class="flex gap-5">
+        <a class="transition-colors hover:text-foreground" href="/docs">Docs</a>
+        <a class="transition-colors hover:text-foreground" href="/changelog">
+          Changelog
+        </a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    const copyButton = document.querySelector<HTMLButtonElement>(
+      '[data-copy-agent]'
+    )
+    const copyStatus = document.querySelector<HTMLElement>(
+      '[data-copy-agent-status]'
+    )
+
+    copyButton?.addEventListener('click', async () => {
+      const prompt = `Hey! First, identify whether this project already uses Convex.
+
+If it does, read the Convex Pulse migration guide at ${window.location.origin}/docs/migration and use it to understand the client-side changes that may be appropriate.
+
+If it does not, read the Convex Pulse introduction at ${window.location.origin}/docs and the official Convex documentation at https://docs.convex.dev before suggesting a setup.
+
+Convex Pulse only covers the client side; it does not replace the Convex backend, schema, functions, or deployment workflow. Please inspect the project's framework and existing conventions, then explain what you recommend before making changes.`
+
+      try {
+        await navigator.clipboard.writeText(prompt)
+        if (copyStatus) {
+          copyStatus.textContent = 'Agent prompt copied to your clipboard.'
+        }
+      } catch {
+        if (copyStatus) {
+          copyStatus.textContent = 'Could not copy the prompt. Please try again.'
+        }
+      }
+    })
+  </script>
+</PageLayout>
