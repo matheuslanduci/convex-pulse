@@ -1,8 +1,16 @@
 {
   "name": "convex-pulse",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "A better Convex client for web",
+  "homepage": "https://github.com/matheuslanduci/convex-pulse#readme",
+  "bugs": {
+    "url": "https://github.com/matheuslanduci/convex-pulse/issues"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/matheuslanduci/convex-pulse.git"
+  },
   "files": [
     "dist",
     "LICENSE",
@@ -72,6 +80,9 @@
       "types": "./dist/vue/index.d.ts",
       "import": "./dist/vue/index.js"
     }
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "benchmark": "pnpm --dir benchmarks benchmark",
